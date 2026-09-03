@@ -4,8 +4,7 @@ import os
 from collections import Counter
 
 app = Flask(__name__)
-
-LOG_FILE = os.path.expanduser("~/honeypot-project/logs/cowrie.json")
+LOG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sample_data", "cowrie.json")
 
 
 def load_events():
