@@ -1,9 +1,23 @@
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, request, session, redirect, url_for
 import json
 import os
+import secrets
+from werkzeug.security import generate_password_hash, check_password_hash
 from collections import Counter
 
 app = Flask(__name__)
+
+app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax"
+)
+
+DEMO_USERNAME = os.environ.get("DEMO_USERNAME", "demo")
+DEMO_PASSWORD_HASH = generate_password_hash(
+    os.environ.get("DEMO_PASSWORD", "StickyDemo2026!")
+)
 
 # ============================================================
 # CONFIGURATION
@@ -1060,6 +1074,18 @@ tr:hover td {
    FOOTER
    ============================================================ */
 
+.sticky-tagline {
+    text-align: center;
+    margin: -20px 0 20px;
+    font-family: "Segoe Script", "Brush Script MT", cursive;
+    font-size: 36px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: #38bdf8;
+    text-shadow:
+        0 0 8px rgba(56, 189, 248, 0.45),
+        2px 2px 0 #6c63ff;
+}
 footer {
 
     border-top:
@@ -1996,6 +2022,7 @@ footer {
      FOOTER
      ============================================================ -->
 
+<div class="sticky-tagline">Let’s Get Sticky</div>
 <footer>
 
     <div class="footer-brand">
@@ -2228,14 +2255,175 @@ setTimeout(function() {
 
 """
 
+LOGIN_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Honeypot AI Login</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background:
+                radial-gradient(circle at top, #10243c 0%, #040b16 55%);
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+        }
+
+        .login-card {
+            width: min(420px, 90%);
+            padding: 40px;
+            background: rgba(8, 24, 42, 0.95);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            border-radius: 22px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+        }
+
+        .shield {
+            width: 58px;
+            height: 58px;
+            margin: 0 auto 18px;
+            display: grid;
+            place-items: center;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #20bfff, #7067ff);
+            font-size: 28px;
+        }
+
+        h1 {
+            margin: 0;
+            text-align: center;
+            font-size: 26px;
+        }
+
+        .subtitle {
+            margin: 8px 0 28px;
+            text-align: center;
+            color: #7ca6ce;
+        }
+
+        label {
+            display: block;
+            margin: 16px 0 7px;
+            color: #b9d5ed;
+            font-size: 14px;
+        }
+
+        input {
+            width: 100%;
+            padding: 13px 14px;
+            border: 1px solid #24435f;
+            border-radius: 10px;
+            background: #071524;
+            color: white;
+            font-size: 15px;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12);
+        }
+
+        button {
+            width: 100%;
+            margin-top: 24px;
+            padding: 13px;
+            border: 0;
+            border-radius: 10px;
+            background: linear-gradient(90deg, #20bfff, #7067ff);
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .error {
+            margin: 0 0 15px;
+            padding: 10px;
+            border: 1px solid #ff5e68;
+            border-radius: 8px;
+            background: rgba(255, 94, 104, 0.12);
+            color: #ff858d;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <form class="login-card" method="POST">
+        <div class="shield">🛡️</div>
+        <h1>Honeypot AI</h1>
+        <p class="subtitle">Secure Business Portal</p>
+
+        {% if error %}
+            <div class="error">{{ error }}</div>
+        {% endif %}
+
+        <label for="username">Username</label>
+        <input id="username" name="username" required autocomplete="username">
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password"
+               required autocomplete="current-password">
+
+        <button type="submit">Sign In</button>
+    </form>
+</body>
+</html>
+"""
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("logged_in"):
+        return redirect(url_for("dashboard"))
+
+    error = None
+
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+
+        valid_username = secrets.compare_digest(username, DEMO_USERNAME)
+        valid_password = check_password_hash(DEMO_PASSWORD_HASH, password)
+
+        if valid_username and valid_password:
+            session.clear()
+            session["logged_in"] = True
+            session["username"] = username
+            return redirect(url_for("dashboard"))
+
+        error = "Incorrect username or password."
+
+    return render_template_string(LOGIN_PAGE, error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
 
 # ============================================================
 # DASHBOARD ROUTE
 # ============================================================
 
 @app.route("/")
+@app.route("/dashboard")
 def dashboard():
-
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
     events = load_events()
 
 
