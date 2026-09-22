@@ -318,7 +318,46 @@ body {
     }
 }
 
+.status-information {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
 
+.status-title {
+    color: #22c55e;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.status-time {
+    margin-top: 3px;
+    color: #617990;
+    font-size: 10px;
+}
+
+.logout-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 6px 11px;
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    border-radius: 7px;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.08);
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 600;
+    transition: 0.2s ease;
+}
+
+.logout-button:hover {
+    color: #ffffff;
+    background: linear-gradient(90deg, #20bfff, #7067ff);
+    border-color: transparent;
+    box-shadow: 0 0 14px rgba(56, 189, 248, 0.3);
+}
 /* ============================================================
    MAIN CONTAINER
    ============================================================ */
@@ -1200,13 +1239,10 @@ footer {
     <div class="logo">
 
         <div class="logo-icon">
-
             <i class="fa-solid fa-shield-halved"></i>
-
         </div>
 
         <div>
-
             <div class="logo-title">
                 Honeypot AI
             </div>
@@ -1214,7 +1250,6 @@ footer {
             <div class="logo-subtitle">
                 Intrusion Detection System
             </div>
-
         </div>
 
     </div>
@@ -1249,28 +1284,26 @@ footer {
 
         <span class="status-dot"></span>
 
-        <div>
+        <div class="status-information">
 
-            <div>
+            <div class="status-title">
                 System Online
             </div>
 
-            <div style="
-                color:#617990;
-                font-size:10px;
-                margin-top:3px;
-            ">
-
+            <div class="status-time">
                 {{ current_time }}
-
             </div>
+
+            <a href="/logout" class="logout-button">
+                <i class="fa-solid fa-right-from-bracket"></i>
+                Logout
+            </a>
 
         </div>
 
     </div>
 
 </nav>
-
 
 
 <!-- ============================================================
