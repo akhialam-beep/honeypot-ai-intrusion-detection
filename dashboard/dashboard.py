@@ -1,15 +1,18 @@
-from flask import Flask, render_template_string, request, session, redirect, url_for
+from flask import Flask, render_template_string, request, session, redirect, url_for, abort, make_response
 import os
 import secrets
 from werkzeug.security import generate_password_hash, check_password_hash
 from collections import Counter
 from pathlib import Path
 import sys
+from datetime import timedelta
+import sqlite3
 
 # Keep the documented `python dashboard/dashboard.py` entry point working.
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ai.analyzer import analyze_events, load_event_log
+from auth_security import reserve_login_attempt, clear_login_attempts
 
 app = Flask(__name__)
 
@@ -17,13 +20,53 @@ app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax"
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("RENDER", "").lower() == "true",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    MAX_CONTENT_LENGTH=8192,
+    LOGIN_THROTTLE_DB=os.environ.get("LOGIN_THROTTLE_DB", os.path.join(app.instance_path, "login-attempts.sqlite3")),
+    LOGIN_ATTEMPT_LIMIT=10,
+    LOGIN_WINDOW_SECONDS=60
 )
 
 DEMO_USERNAME = os.environ.get("DEMO_USERNAME", "demo")
-DEMO_PASSWORD_HASH = generate_password_hash(
+DEMO_PASSWORD_HASH = os.environ.get("DEMO_PASSWORD_HASH") or generate_password_hash(
     os.environ.get("DEMO_PASSWORD", "StickyDemo2026!")
 )
+
+def csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return session["csrf_token"]
+
+
+def require_csrf():
+    expected = session.get("csrf_token", "")
+    supplied = request.form.get("csrf_token", "")
+    if not expected or not secrets.compare_digest(expected.encode(), supplied.encode()):
+        abort(400, "This form expired. Reload the page and try again.")
+
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+@app.after_request
+def protect_private_responses(response):
+    if request.endpoint in {"dashboard", "login", "logout"}:
+        response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "same-origin"
+    return response
+
+
+EVENT_LABELS = {
+    "cowrie.command.input": "Command entered",
+    "cowrie.login.failed": "Failed login",
+    "cowrie.login.success": "Accepted login",
+    "cowrie.session.connect": "New connection",
+    "cowrie.session.closed": "Connection ended",
+}
+
 
 # ============================================================
 # CONFIGURATION
@@ -52,7 +95,7 @@ HTML = """
 
 <!DOCTYPE html>
 
-<html>
+<html lang="en">
 
 <head>
 
@@ -99,7 +142,7 @@ HTML = """
     ></script>
 
 
-<link rel="stylesheet" href="{{ url_for('static', filename='analysis.css') }}">
+
 
 <style>
 
@@ -1138,7 +1181,7 @@ footer {
 }
 
 </style>
-
+<link rel="stylesheet" href="{{ url_for('static', filename='analysis.css', v='20260923b') }}">
 </head>
 
 
@@ -1179,7 +1222,7 @@ footer {
 
         <a class="nav-link" href="#activity">
             <i class="fa-solid fa-tower-broadcast"></i>
-            Live Feed
+            Activity records
         </a>
 
         <a class="nav-link" href="#analytics">
@@ -1207,17 +1250,17 @@ footer {
         <div class="status-information">
 
             <div class="status-title">
-                System Online
+                {{ "Demo mode" if is_sample_data else "Recorded activity" }}
             </div>
 
             <div class="status-time">
                 {{ current_time }}
             </div>
 
-            <a href="/logout" class="logout-button">
-                <i class="fa-solid fa-right-from-bracket"></i>
-                Logout
-            </a>
+            <form action="{{ url_for('logout') }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="logout-button" type="submit">Log out</button>
+            </form>
 
         </div>
 
@@ -1231,6 +1274,16 @@ footer {
      ============================================================ -->
 
 <div class="container" id="dashboard">
+<div class="demo-notice" role="note">
+    <strong>{{ 'Demo — sample data' if is_sample_data else 'Recorded activity — no live monitoring' }}</strong>
+    <span>{{ 'This page uses example records. It is not monitoring a live system.' if is_sample_data else 'This page reads a saved activity file. Refreshing rechecks that file.' }}</span>
+</div>
+<nav class="section-shortcuts" aria-label="Dashboard sections">
+    <a href="#ai-analysis">Security summary</a><a href="#activity">Activity records</a><a href="#map-section">Example map</a>
+    <form action="{{ url_for('logout') }}" method="post" class="mobile-logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Log out</button>
+    </form>
+</nav>
 
 
 <!-- ============================================================
@@ -1260,17 +1313,15 @@ footer {
 
         <div class="hero-subtitle">
 
-            Monitor. Analyze. Detect. Stay Ahead.
+            Understand suspicious activity, one step at a time.
 
         </div>
 
 
         <div class="hero-description">
 
-            This dashboard visualizes activity collected by our
-            Cowrie honeypot and presents security events,
-            source IP addresses, login attempts, commands,
-            and AI-based threat classification.
+            A honeypot is a test system that records connection attempts.
+            Explore {{ 'example' if is_sample_data else 'recorded' }} activity and see what needs a closer look.
 
         </div>
 
@@ -1304,7 +1355,7 @@ footer {
         </div>
 
         <div class="metric-footer">
-            Events collected by Cowrie
+            Recorded actions and connections
         </div>
 
         <div class="metric-line"></div>
@@ -1330,7 +1381,7 @@ footer {
         </div>
 
         <div class="metric-footer">
-            Commands entered by sessions
+            Instructions entered on the test system
         </div>
 
         <div class="metric-line"></div>
@@ -1356,7 +1407,7 @@ footer {
         </div>
 
         <div class="metric-footer">
-            Authentication activity
+            Attempts to sign in
         </div>
 
         <div class="metric-line"></div>
@@ -1392,6 +1443,8 @@ footer {
 
 
 
+{% include "ai_analysis.html" %}
+
 <!-- ============================================================
      MAP + CHART
      ============================================================ -->
@@ -1411,13 +1464,13 @@ footer {
 
                     <i class="fa-solid fa-location-dot"></i>
 
-                    Attacker Locations
+                    Example connection locations
 
                 </div>
 
                 <div class="panel-subtitle">
 
-                    Geographic distribution of source IP addresses
+                    Preset map points for the demo — not verified locations
 
                 </div>
 
@@ -1575,109 +1628,9 @@ footer {
      THREE COLUMN SECTION
      ============================================================ -->
 
-<div class="three-columns">
+{% include "activity.html" %}
 
-
-    <!-- RECENT ACTIVITY -->
-
-    <section
-        class="card-panel"
-        id="activity"
-    >
-
-        <div class="panel-header">
-
-            <div class="panel-title">
-
-                <i class="fa-solid fa-clock-rotate-left"></i>
-
-                Recent Activity
-
-            </div>
-
-            <a class="view-all" href="#activity">
-                View All →
-            </a>
-
-        </div>
-
-
-        <div class="table-container">
-
-            <table>
-
-                <thead>
-
-                    <tr>
-
-                        <th>Time</th>
-
-                        <th>Event</th>
-
-                        <th>Source IP</th>
-
-                    </tr>
-
-                </thead>
-
-
-                <tbody>
-
-                    {% for event in recent_events %}
-
-                    <tr>
-
-                        <td>
-                            {{ event.timestamp }}
-                        </td>
-
-                        <td>
-
-                            {% if "failed" in event.event %}
-
-                                <span class="badge badge-red">
-                                    {{ event.event }}
-                                </span>
-
-                            {% elif "success" in event.event %}
-
-                                <span class="badge badge-green">
-                                    {{ event.event }}
-                                </span>
-
-                            {% elif "command" in event.event %}
-
-                                <span class="badge badge-blue">
-                                    {{ event.event }}
-                                </span>
-
-                            {% else %}
-
-                                <span class="badge badge-purple">
-                                    {{ event.event }}
-                                </span>
-
-                            {% endif %}
-
-                        </td>
-
-                        <td class="ip">
-                            {{ event.ip }}
-                        </td>
-
-                    </tr>
-
-                    {% endfor %}
-
-                </tbody>
-
-            </table>
-
-        </div>
-
-    </section>
-
-
+<div class="three-columns secondary-tables">
 
     <!-- LOGIN ATTEMPTS -->
 
@@ -1845,13 +1798,6 @@ footer {
 
 
 
-<!-- ============================================================
-     AI ANALYSIS
-     ============================================================ -->
-
-{% include "ai_analysis.html" %}
-
-
 </div>
 
 
@@ -1958,7 +1904,7 @@ attackerLocations.forEach(function(location) {
 
             <strong>
                 <i class="fa-solid fa-triangle-exclamation"></i>
-                Attacker Activity
+                Example connection
             </strong>
 
             <br><br>
@@ -1973,7 +1919,7 @@ attackerLocations.forEach(function(location) {
 
             <br>
 
-            <strong>Location:</strong>
+            <strong>Example location (preset):</strong>
             ${location.location}
 
         </div>
@@ -2081,7 +2027,7 @@ new Chart(ctx, {
 setInterval(function() {
     // Keep expanded evidence and keyboard focus intact while someone is reading.
     if (document.visibilityState === "visible" &&
-        !document.querySelector("#ai-analysis details[open], #ai-analysis:focus-within")) {
+        !document.querySelector("details[open], input:focus, select:focus, button:focus, #ai-analysis:focus-within")) {
         location.reload();
     }
 }, 60000);
@@ -2202,20 +2148,21 @@ LOGIN_PAGE = """
 
 <body>
     <form class="login-card" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="shield">🛡️</div>
         <h1>Honeypot AI</h1>
-        <p class="subtitle">Secure Business Portal</p>
+        <p class="subtitle">Security activity dashboard</p>
 
         {% if error %}
             <div class="error">{{ error }}</div>
         {% endif %}
 
         <label for="username">Username</label>
-        <input id="username" name="username" required autocomplete="username">
+        <input id="username" name="username" required maxlength="128" autocomplete="username">
 
         <label for="password">Password</label>
         <input id="password" name="password" type="password"
-               required autocomplete="current-password">
+               required maxlength="1024" autocomplete="current-password">
 
         <button type="submit">Sign In</button>
     </form>
@@ -2228,29 +2175,41 @@ LOGIN_PAGE = """
 def login():
     if session.get("logged_in"):
         return redirect(url_for("dashboard"))
-
     error = None
-
     if request.method == "POST":
+        require_csrf()
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-
-        valid_username = secrets.compare_digest(username, DEMO_USERNAME)
+        if len(username) > 128 or len(password) > 1024:
+            abort(400, "Username or password is too long.")
+        valid_username = secrets.compare_digest(username.encode(), DEMO_USERNAME.encode())
+        # Account-level buckets cannot be bypassed by forging proxy/IP headers.
+        bucket = "account" if valid_username else "unknown"
+        try:
+            retry = reserve_login_attempt(app.config["LOGIN_THROTTLE_DB"], bucket,
+                                          app.config["LOGIN_ATTEMPT_LIMIT"], app.config["LOGIN_WINDOW_SECONDS"])
+        except sqlite3.Error:
+            return render_template_string(LOGIN_PAGE, error="Sign-in is temporarily unavailable. Please try again shortly."), 503
+        if retry:
+            response = make_response(render_template_string(LOGIN_PAGE, error=f"Too many sign-in attempts. Try again in {retry} seconds."), 429)
+            response.headers["Retry-After"] = str(retry)
+            return response
         valid_password = check_password_hash(DEMO_PASSWORD_HASH, password)
-
         if valid_username and valid_password:
+            clear_login_attempts(app.config["LOGIN_THROTTLE_DB"], bucket)
             session.clear()
+            session.permanent = True
             session["logged_in"] = True
             session["username"] = username
+            csrf_token()
             return redirect(url_for("dashboard"))
-
         error = "Incorrect username or password."
-
     return render_template_string(LOGIN_PAGE, error=error)
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
+    require_csrf()
     session.clear()
     return redirect(url_for("login"))
 
@@ -2378,33 +2337,29 @@ def dashboard():
     # RECENT EVENTS
     # --------------------------------------------------------
 
-    recent_events = []
-
-
-    for event in reversed(events[-10:]):
-
-        recent_events.append({
-
-            "timestamp":
-                event.get(
-                    "timestamp",
-                    "N/A"
-                ),
-
-            "event":
-                event.get(
-                    "eventid",
-                    "N/A"
-                ),
-
-            "ip":
-                event.get(
-                    "src_ip",
-                    "N/A"
-                )
-
-        })
-
+    event_filter = request.args.get("event_type", "")
+    source_filter = request.args.get("source_ip", "")
+    show_all = request.args.get("view") == "all" or bool(event_filter or source_filter)
+    matching = [event for event in reversed(events)
+                if (not event_filter or event["eventid"] == event_filter)
+                and (not source_filter or event["src_ip"] == source_filter)]
+    page_size = 25 if show_all else 10
+    page_count = max(1, (len(matching) + page_size - 1) // page_size)
+    page = min(max(request.args.get("page", 1, type=int), 1), page_count) if show_all else 1
+    start = (page - 1) * page_size
+    activity = {
+        "events": matching[start:start + page_size], "count": len(matching), "show_all": show_all,
+        "page": page, "pages": page_count, "first": start + 1 if matching else 0,
+        "last": min(start + page_size, len(matching)), "event_filter": event_filter,
+        "source_filter": source_filter,
+        "event_options": sorted({event["eventid"] for event in events} | ({event_filter} if event_filter else set())),
+        "source_options": sorted({event["src_ip"] for event in events if event["src_ip"]} | ({source_filter} if source_filter else set())),
+    }
+    def activity_url(page=1):
+        return url_for("dashboard", view="all", page=page,
+                       event_type=event_filter, source_ip=source_filter, _anchor="activity")
+    activity.update(all_url=activity_url(),
+                    previous_url=activity_url(max(1, page - 1)), next_url=activity_url(min(page_count, page + 1)))
 
     # --------------------------------------------------------
     # MAP DATA
@@ -2480,9 +2435,7 @@ def dashboard():
     )
 
 
-    event_labels = list(
-        event_counter.keys()
-    )
+    event_labels = [EVENT_LABELS.get(name, name) for name in event_counter]
 
 
     event_values = list(
@@ -2494,11 +2447,9 @@ def dashboard():
     # CURRENT TIME
     # --------------------------------------------------------
 
-    from datetime import datetime
+    from datetime import datetime, timezone
 
-    current_time = datetime.now().strftime(
-        "%b %d, %Y %I:%M %p"
-    )
+    current_time = datetime.now(timezone.utc).strftime("%b %d, %Y %I:%M %p UTC")
 
 
     # --------------------------------------------------------
@@ -2554,8 +2505,8 @@ def dashboard():
         login_events=
             login_events[-10:],
 
-        recent_events=
-            recent_events,
+        activity=activity,
+        event_labels_map=EVENT_LABELS,
 
         max_ip_count=
             max_ip_count,

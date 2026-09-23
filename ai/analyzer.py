@@ -15,9 +15,9 @@ SEVERITY = {"Unknown": -1, "Low": 0, "Medium": 1, "High": 2}
 TRAINING_X = [[0, 0], [1, 1], [2, 1], [3, 1], [4, 1], [8, 3], [10, 4], [15, 5]]
 TRAINING_Y = [0, 0, 0, 0, 0, 1, 1, 1]
 MODEL_LIMITATION = (
-    "Demonstration model trained on eight synthetic examples, using command and login counts only. "
-    "Its signal is not validated accuracy or a calibrated probability of an attack. "
-    "Evidence rules are evaluated separately; neither result proves a compromise."
+    "This practice model learned from eight made-up examples. It only counts commands and login attempts. "
+    "Its score does not tell us how likely an attack is, and its accuracy has not been tested on real activity. "
+    "Separate checks look for suspicious actions. Neither result proves a break-in."
 )
 
 
@@ -132,11 +132,11 @@ def command_indicators(text):
 
 
 RULES = {
-    "download": ("High", "Remote download command", "A command attempts to retrieve content from a remote address. The log does not establish that the download succeeded.", "Review the session and destination in your approved investigation tools. Preserve any captured artifact without opening or running it."),
-    "account-files": ("High", "Account-file access command", "A command targets a local account file. This can indicate account discovery; the command alone does not establish that data was read.", "Inspect the session transcript for command output and follow-on activity. Verify that the honeypot remains isolated from production systems."),
-    "failed-logins": ("Medium", "Repeated failed logins", "At least three failed logins share a source IP within the loaded log. This is repeated activity, not a measured attack rate.", "Review usernames and timestamps for this source. Correlate with other authentication logs before considering access-control changes."),
-    "successful-login": ("Medium", "Honeypot login accepted", "The honeypot recorded an accepted login. This refers to the decoy service and does not prove access to a production account.", "Review commands in the accepted session and confirm the decoy is separated from real accounts and services."),
-    "recon": ("Low", "System discovery commands", "Commands inspect identity, directories or system information. These commands can also be part of ordinary administration.", "Review these commands alongside download, account-access and login evidence before assigning intent."),
+    "download": ("High", "Attempted file download", "Someone tried to download a file. We cannot tell whether the attempt succeeded.", "Check the full activity record and the download address. Do not open or run the file."),
+    "account-files": ("High", "Attempted to read account details", "Someone tried to read an account file. We cannot tell whether the attempt succeeded.", "Check what the command returned and what happened next. Keep the test system separate from real systems."),
+    "failed-logins": ("Medium", "Repeated login failures", "The same connection address has at least three failed login attempts in these records.", "Check the usernames and times. Compare other records before deciding whether to block the address."),
+    "successful-login": ("Medium", "Login accepted by the test system", "The test system accepted a login. This does not mean someone accessed a real account.", "Review what happened after the login. Check that the test system is separate from real accounts."),
+    "recon": ("Low", "Checked basic system information", "Commands checked the username, folders or system details. These can also be normal actions.", "Compare these commands with the other activity before deciding whether they are suspicious."),
 }
 
 
@@ -190,13 +190,13 @@ def analyze_events(events):
         summary = "Events are present, but no command or login activity is available for this analysis."
     elif priority == "High":
         status = "SUSPICIOUS"
-        summary = "High-priority command indicators need review. Inspect the evidence and session context before drawing conclusions about intent or impact."
+        summary = "Some recorded actions need a closer look. Check the evidence below; it does not prove a break-in."
     elif priority == "Medium" or (model["suspicious_signal"] or 0) > 50:
         status, priority = "REVIEW", "Medium"
-        summary = "Activity merits a closer look. Review the observed patterns and the demonstration model signal together."
+        summary = "Some activity needs review. Check the recorded actions before deciding what happened."
     else:
         status = "NO INDICATORS" if not findings else "OBSERVED"
-        summary = "No high-priority indicators were found by the current checks. This does not establish that the activity is safe."
+        summary = "These checks found no high-priority warning signs. That does not guarantee the activity is safe."
 
     sources = []
     for ip, rows in source_events.items():

@@ -33,9 +33,9 @@ class DashboardAnalysisTests(unittest.TestCase):
         response = self.client.get("/dashboard")
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        for text in ['id="ai-analysis"', 'href="#ai-analysis"', "Remote download command",
-                     "Account-file access command", "185.220.101.5", "Recommended next steps",
-                     "Demonstration model", "Refresh analysis"]:
+        for text in ['id="ai-analysis"', 'href="#ai-analysis"', "Attempted file download",
+                     "Attempted to read account details", "185.220.101.5", "What to check next",
+                     "How the demo works", "Refresh analysis"]:
             self.assertIn(text, html)
 
     def test_untrusted_log_text_is_escaped_in_markup_and_script_data(self):

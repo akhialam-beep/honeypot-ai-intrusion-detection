@@ -82,7 +82,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(result["model"]["training_examples"], 8)
         self.assertGreater(result["model"]["suspicious_signal"], 50)
         self.assertEqual(result["model"]["features"]["commands"], 15)
-        self.assertIn("demonstration", result["model"]["limitation"].lower())
+        self.assertIn("eight made-up examples", result["model"]["limitation"].lower())
         self.assertIs(analyzer.get_model(), analyzer.get_model())
 
     def test_loader_ignores_malformed_rows_and_missing_fields(self):

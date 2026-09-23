@@ -1,0 +1,31 @@
+<section class="card-panel activity-panel" id="activity" aria-labelledby="activity-title">
+    <div class="panel-header">
+        <div><h2 class="panel-title" id="activity-title">{{ 'All activity records' if activity.show_all else 'Recent activity' }}</h2>
+        <p class="panel-subtitle">{{ activity.count }} matching events. Filters below affect this list only.</p></div>
+        {% if not activity.show_all %}<a class="view-all" href="{{ activity.all_url }}">View all records →</a>{% endif %}
+    </div>
+    <form class="activity-filters" action="{{ url_for('dashboard') }}#activity" method="get">
+        <input type="hidden" name="view" value="all">
+        <label>Activity type<select name="event_type">
+            <option value="">All types</option>
+            {% for name in activity.event_options %}<option value="{{ name }}" {{ 'selected' if activity.event_filter == name else '' }}>{{ event_labels_map.get(name, name) }}</option>{% endfor %}
+        </select></label>
+        <label>Connection address<select name="source_ip">
+            <option value="">All addresses</option>
+            {% for ip in activity.source_options %}<option value="{{ ip }}" {{ 'selected' if activity.source_filter == ip else '' }}>{{ ip }}</option>{% endfor %}
+        </select></label>
+        <button type="submit">Apply filters</button><a href="{{ url_for('dashboard', view='all', _anchor='activity') }}">Clear filters</a>
+    </form>
+    <div class="table-container" tabindex="0" role="region" aria-label="Activity records; scroll horizontally on small screens">
+        <table><thead><tr><th scope="col">Recorded time</th><th scope="col">What happened</th><th scope="col">Connection address (IP)</th><th scope="col">Details</th></tr></thead>
+        <tbody>{% for event in activity.events %}
+            <tr><td><time>{{ event.timestamp or 'Time unavailable' }}</time></td><td>{{ event_labels_map.get(event.eventid, event.eventid) }}</td><td class="ip">{{ event.src_ip or 'Unknown' }}</td><td><code>{{ event.input[:400] if event.input else ('User: ' + event.username if event.username else '—') }}</code></td></tr>
+        {% else %}<tr><td colspan="4">No activity matches these filters.</td></tr>{% endfor %}</tbody></table>
+    </div>
+    <nav class="activity-pagination" aria-label="Activity pages">
+        <span>{{ activity.first }}–{{ activity.last }} of {{ activity.count }}{% if activity.show_all %} · Page {{ activity.page }} of {{ activity.pages }}{% endif %}</span>
+        {% if activity.show_all and activity.page > 1 %}<a href="{{ activity.previous_url }}">← Previous</a>{% endif %}
+        {% if activity.show_all and activity.page < activity.pages %}<a href="{{ activity.next_url }}">Next →</a>{% endif %}
+        {% if not activity.show_all and activity.count > 10 %}<a href="{{ activity.all_url }}">View all {{ activity.count }} records →</a>{% endif %}
+    </nav>
+</section>

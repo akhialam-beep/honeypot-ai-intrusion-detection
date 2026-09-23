@@ -17,7 +17,7 @@ Open http://127.0.0.1:5050 and keep the server running. The bundled demo sign-in
 
 ## AI Analysis
 
-Choose **AI Analysis** in the navigation, or the **View analysis** link in the overview. The section displays an overall assessment, expandable evidence, per-source priorities, recommended next steps and a separate demonstration model signal. **Refresh analysis** reads the current log again. Automatic refresh pauses while evidence is expanded or keyboard focus is inside the section.
+Choose **AI Analysis** in the navigation, or the **View analysis** link in the overview. The section displays an overall assessment, expandable evidence, per-source priorities, recommended next steps and a separate demonstration model signal. **Refresh analysis** reads the current log again. The sample-data notice appears at the top, map points are labelled as preset examples, and the practice model score is collapsed under **How the demo works**. Automatic refresh pauses while evidence is expanded or a form control is focused. Use **Activity records** to filter by type and connection address. **View all records** provides 25 records per page; filters affect only that list, not the full-log analysis.
 
 The dashboard currently reads `sample_data/cowrie.json` and labels it as sample data. `LOG_FILE` in `dashboard/dashboard.py` selects the input. Each nonempty line should contain an object with a string `eventid`. Optional `src_ip`, `timestamp`, `input`, `username` and `session` fields must be strings or null. Invalid rows are skipped and counted. Missing files, no events and events outside the supported command/login types produce explicit limited-data states.
 
@@ -50,3 +50,13 @@ venv/bin/python ai/analyzer.py /path/to/cowrie.json
 ```
 
 Tests cover source attribution, sample findings, real model evaluation, benign command text, quoted delimiters, malformed records, extreme timestamps, authentication, empty states, refresh submission and HTML/script escaping. The analysis module is import-safe and can be reused by future data sources.
+
+## Hosted login protections
+
+Render sessions use HTTPS-only, HttpOnly, SameSite=Lax cookies, an eight-hour session lifetime, CSRF checks on sign-in/sign-out, and no-store responses. Local HTTP remains usable. Sign-out is a POST form.
+
+Sign-in allows ten attempts per minute for the configured account, plus a separate shared bucket for unknown usernames. SQLite reservations are atomic and shared by workers on one server instance. Failed attempts cannot be reset by opening a new browser session; a successful login clears that account's counter. An attacker can temporarily exhaust the account limit, so use an edge or shared-store limiter before expanding to multiple instances. The local limiter resets on a new Render instance/deploy and is not a substitute for private credentials.
+
+Before using private activity, the owner must enter their own `DEMO_USERNAME`, `DEMO_PASSWORD` (or a Werkzeug `DEMO_PASSWORD_HASH`), and a stable random `SECRET_KEY` in Render's Environment settings. The shared demo login remains until those values are configured. A hash takes precedence over the plain password. Never commit credentials. If `SECRET_KEY` is absent, the fallback changes on process restart and sessions can be invalidated; a stable key is required for multiple workers.
+
+The throttle file defaults to `instance/login-attempts.sqlite3`, contains only bucket counters and timestamps, and is excluded from Git. Override its location with `LOGIN_THROTTLE_DB` if needed.
