@@ -1274,10 +1274,6 @@ footer {
      ============================================================ -->
 
 <div class="container" id="dashboard">
-<div class="demo-notice" role="note">
-    <strong>{{ 'Demo — sample data' if is_sample_data else 'Recorded activity — no live monitoring' }}</strong>
-    <span>{{ 'This page uses example records. It is not monitoring a live system.' if is_sample_data else 'This page reads a saved activity file. Refreshing rechecks that file.' }}</span>
-</div>
 <nav class="section-shortcuts" aria-label="Dashboard sections">
     <a href="#ai-analysis">Security summary</a><a href="#activity">Activity records</a><a href="#map-section">Example map</a>
     <form action="{{ url_for('logout') }}" method="post" class="mobile-logout">
