@@ -1,0 +1,122 @@
+<section class="analysis-panel" id="ai-analysis" aria-labelledby="analysis-heading">
+    <header class="analysis-heading">
+        <div>
+            <p class="analysis-eyebrow"><span aria-hidden="true">◈</span> LOCAL INTELLIGENCE / COWRIE</p>
+            <h2 id="analysis-heading">AI Analysis<span class="analysis-heading-dot">.</span></h2>
+            <p class="analysis-subtitle">From recorded activity to evidence you can review.</p>
+        </div>
+        <form action="{{ url_for('dashboard') }}#ai-analysis" method="get">
+            <button class="analysis-refresh" type="submit" name="refresh" value="analysis"><span aria-hidden="true">↻</span> Refresh analysis</button>
+        </form>
+    </header>
+
+    <div class="analysis-context">
+        <span class="analysis-data-label">{{ 'Sample data' if is_sample_data else 'Configured log' }}</span>
+        <span>{{ analysis.event_count }} events</span>
+        <span>{{ analysis.source_count }} source groups</span>
+        <span>Updated {{ current_time }}</span>
+    </div>
+    {% if log_batch.error %}
+    <p class="analysis-notice" role="status">{{ log_batch.error }}</p>
+    {% endif %}
+    {% if log_batch.skipped %}
+    <p class="analysis-notice" role="status">{{ log_batch.skipped }} invalid records skipped. This assessment covers usable records only.</p>
+    {% endif %}
+
+    <div class="analysis-grid">
+        <aside class="analysis-assessment severity-{{ analysis.priority|lower }}" aria-label="Overall assessment">
+            <p class="analysis-eyebrow">01 / ASSESSMENT</p>
+            <span class="analysis-priority">{{ analysis.priority }} priority</span>
+            <h3>{{ analysis.status|replace('NO INDICATORS', 'No indicators')|replace('NO DATA', 'No data')|replace('LIMITED DATA', 'Limited data')|replace('SUSPICIOUS', 'Suspicious activity')|replace('OBSERVED', 'Activity observed')|replace('REVIEW', 'Review activity') }}</h3>
+            <p>{{ analysis.summary }}</p>
+            <div class="analysis-totals">
+                <div><strong>{{ analysis.findings|length }}</strong><span>finding types</span></div>
+                <div><strong>{{ analysis.command_count }}</strong><span>commands</span></div>
+                <div><strong>{{ analysis.login_count }}</strong><span>login events</span></div>
+            </div>
+            {% if analysis.first_event %}
+            <div class="analysis-window">
+                <span class="analysis-eyebrow">OBSERVED WINDOW</span>
+                <span>{{ analysis.first_event }}</span>
+                <span>to {{ analysis.last_event }}</span>
+            </div>
+            {% endif %}
+            <p class="analysis-footnote">Priority reflects the strongest evidence rule, or a review signal from the demo model. No systems are automatically blocked or changed.</p>
+        </aside>
+
+        <div class="analysis-findings">
+            <div class="analysis-section-title"><h3>02 / What stands out</h3><span>Observed evidence</span></div>
+            {% for finding in analysis.findings %}
+            <article class="analysis-finding severity-{{ finding.severity|lower }}">
+                <div class="analysis-finding-title"><h4>{{ finding.title }}</h4><span class="analysis-severity">{{ finding.severity }}</span></div>
+                <p>{{ finding.description }}</p>
+                <details>
+                    <summary>View evidence <span>{{ finding.count }} matching event{{ '' if finding.count == 1 else 's' }}</span></summary>
+                    <ol class="analysis-evidence">
+                        {% for evidence in finding.evidence %}
+                        <li>
+                            <div><strong>{{ evidence.ip }}</strong><time>{{ evidence.timestamp }}</time></div>
+                            <code>{{ evidence.detail }}</code>
+                        </li>
+                        {% endfor %}
+                    </ol>
+                    {% if finding.count > finding.evidence|length %}<p class="analysis-footnote">Showing the first {{ finding.evidence|length }} of {{ finding.count }} matching events.</p>{% endif %}
+                </details>
+            </article>
+            {% else %}
+            <div class="analysis-empty">
+                <span aria-hidden="true">◎</span>
+                <h4>{{ 'Waiting for usable activity' if analysis.priority == 'Unknown' else 'No matching evidence rules' }}</h4>
+                <p>{{ 'Command and login records will appear here when they are available.' if analysis.priority == 'Unknown' else 'The current checks did not find a matching pattern. Review the underlying log and the model signal for context.' }}</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <section class="analysis-sources" aria-labelledby="analysis-sources-heading">
+        <div class="analysis-section-title"><h3 id="analysis-sources-heading">03 / Source breakdown</h3><span>Ranked by observed evidence</span></div>
+        {% if analysis.sources %}
+        <div class="analysis-table-scroll" tabindex="0" role="region" aria-label="Source evidence table; scroll horizontally on small screens">
+            <table>
+                <thead><tr><th scope="col">Source IP</th><th scope="col">Events</th><th scope="col">Commands</th><th scope="col">Failed / accepted logins</th><th scope="col">Observed patterns</th><th scope="col">Priority</th></tr></thead>
+                <tbody>{% for source in analysis.sources %}
+                    <tr><th scope="row"><code>{{ source.ip }}</code></th><td>{{ source.event_count }}</td><td>{{ source.commands }}</td><td>{{ source.failed_logins }} / {{ source.successful_logins }}</td><td>{{ source.findings|join(' · ') if source.findings else 'No matching rules' }}</td><td><span class="analysis-severity severity-{{ source.severity|lower }}">{{ source.severity if source.severity != 'Unknown' else 'Unassessed' }}</span></td></tr>
+                {% endfor %}</tbody>
+            </table>
+        </div>
+        {% if analysis.source_count > analysis.sources|length %}<p class="analysis-footnote">Showing {{ analysis.sources|length }} of {{ analysis.source_count }} source groups. Totals and findings include all usable events.</p>{% endif %}
+        {% else %}<p class="analysis-footnote">No sources available yet.</p>{% endif %}
+    </section>
+
+    <div class="analysis-bottom-grid">
+        <section class="analysis-actions" aria-labelledby="analysis-actions-heading">
+            <div class="analysis-section-title"><h3 id="analysis-actions-heading">04 / Recommended next steps</h3></div>
+            <ol>
+                {% for finding in analysis.findings if finding.severity != 'Low' %}
+                <li><strong>{{ finding.title }}</strong><p>{{ finding.recommendation }}</p></li>
+                {% else %}
+                <li><strong>{{ 'Connect usable Cowrie data' if analysis.priority == 'Unknown' else 'Review the session context' }}</strong><p>{{ 'Check that the configured log contains readable JSON-lines events, then refresh this analysis.' if analysis.priority == 'Unknown' else 'Compare command and login activity with the original session transcript. Continue collecting evidence before assigning intent.' }}</p></li>
+                {% endfor %}
+            </ol>
+        </section>
+        <aside class="analysis-model" aria-labelledby="analysis-model-heading">
+            <p class="analysis-eyebrow">SECOND OPINION</p>
+            <h3 id="analysis-model-heading">Demonstration model</h3>
+            <p>{{ analysis.model.label }}</p>
+            {% if analysis.model.available %}
+                <div class="analysis-model-number"><strong>{{ analysis.model.suspicious_signal }}<small>%</small></strong><span>suspicious-class<br>model signal</span></div>
+                <meter min="0" max="100" value="{{ analysis.model.suspicious_signal }}" aria-label="Suspicious-class demonstration model signal">{{ analysis.model.suspicious_signal }}%</meter>
+                <p class="analysis-footnote">A demo signal, not a measured likelihood of an attack.</p>
+            {% else %}
+                <p class="analysis-footnote">{{ 'Evidence rules remain available while the model cannot be loaded.' if analysis.model.label == 'Model unavailable' else 'Needs command or login activity before evaluation.' }}</p>
+            {% endif %}
+            <details>
+                <summary>How this analysis works</summary>
+                <p>{{ analysis.model.limitation }}</p>
+                <p>Random Forest · 100 trees · {{ analysis.model.training_examples }} training examples. Inputs: {{ analysis.model.features.commands }} commands and {{ analysis.model.features.logins }} login events across the loaded log.</p>
+                <p>Evidence rules check basic download and account-file commands, discovery commands, accepted logins, and three or more failed logins per known source. These checks are not exhaustive.</p>
+            </details>
+        </aside>
+    </div>
+    <footer class="analysis-footer"><span><span aria-hidden="true">●</span> Analysis runs locally on this server</span><span>{{ 'Bundled demonstration events · not a live feed' if is_sample_data else 'Assessment covers the configured event log' }}</span></footer>
+</section>

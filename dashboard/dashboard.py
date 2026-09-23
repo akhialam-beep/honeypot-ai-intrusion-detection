@@ -1,9 +1,15 @@
 from flask import Flask, render_template_string, request, session, redirect, url_for
-import json
 import os
 import secrets
 from werkzeug.security import generate_password_hash, check_password_hash
 from collections import Counter
+from pathlib import Path
+import sys
+
+# Keep the documented `python dashboard/dashboard.py` entry point working.
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ai.analyzer import analyze_events, load_event_log
 
 app = Flask(__name__)
 
@@ -35,27 +41,7 @@ LOG_FILE = os.path.join(
 # ============================================================
 
 def load_events():
-    events = []
-
-    if not os.path.exists(LOG_FILE):
-        return events
-
-    with open(LOG_FILE, "r") as file:
-
-        for line in file:
-
-            line = line.strip()
-
-            if not line:
-                continue
-
-            try:
-                events.append(json.loads(line))
-
-            except json.JSONDecodeError:
-                pass
-
-    return events
+    return load_event_log(LOG_FILE)["events"]
 
 
 # ============================================================
@@ -85,7 +71,7 @@ HTML = """
     <!-- Google Font -->
 
     <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
         rel="stylesheet"
     >
 
@@ -112,6 +98,8 @@ HTML = """
         src="https://cdn.jsdelivr.net/npm/chart.js"
     ></script>
 
+
+<link rel="stylesheet" href="{{ url_for('static', filename='analysis.css') }}">
 
 <style>
 
@@ -1037,79 +1025,6 @@ tr:hover td {
 
 
 /* ============================================================
-   AI STATUS
-   ============================================================ */
-
-.ai-status {
-
-    display: flex;
-
-    align-items: center;
-
-    gap: 15px;
-
-    padding: 20px;
-
-    border-radius: 15px;
-
-    background:
-        linear-gradient(
-            135deg,
-            rgba(239,68,68,0.1),
-            rgba(127,29,29,0.08)
-        );
-
-    border:
-        1px solid rgba(239,68,68,0.2);
-
-    margin-bottom: 20px;
-}
-
-
-.ai-status-icon {
-
-    width: 48px;
-
-    height: 48px;
-
-    border-radius: 14px;
-
-    display: flex;
-
-    align-items: center;
-
-    justify-content: center;
-
-    color: #f87171;
-
-    background:
-        rgba(239,68,68,0.13);
-
-    font-size: 20px;
-}
-
-
-.ai-title {
-
-    font-weight: 800;
-
-    color: #f87171;
-
-    font-size: 16px;
-}
-
-
-.ai-description {
-
-    color: #7890a8;
-
-    font-size: 11px;
-
-    margin-top: 4px;
-}
-
-
-/* ============================================================
    FOOTER
    ============================================================ */
 
@@ -1270,6 +1185,11 @@ footer {
         <a class="nav-link" href="#analytics">
             <i class="fa-solid fa-chart-line"></i>
             Analytics
+        </a>
+
+        <a class="nav-link" href="#ai-analysis">
+            <i class="fa-solid fa-brain"></i>
+            AI Analysis
         </a>
 
         <a class="nav-link" href="#map-section">
@@ -1454,48 +1374,14 @@ footer {
         </div>
 
         <div class="metric-title">
-            AI CLASSIFICATION
+            ANALYSIS STATUS
         </div>
-
-
-        {% if classification == "SUSPICIOUS" %}
-
-            <div
-                class="metric-number"
-                style="color:#f87171;"
-            >
-
-                SUSPICIOUS
-
-            </div>
-
-            <div class="metric-footer">
-
-                <i class="fa-solid fa-circle-exclamation"></i>
-
-                Potential threat detected
-
-            </div>
-
-        {% else %}
-
-            <div
-                class="metric-number"
-                style="color:#4ade80;"
-            >
-
-                NORMAL
-
-            </div>
-
-            <div class="metric-footer">
-
-                Activity within threshold
-
-            </div>
-
-        {% endif %}
-
+        <div class="metric-number" style="font-size:24px;">
+            {{ analysis.status }}
+        </div>
+        <div class="metric-footer">
+            <a href="#ai-analysis" style="color:inherit;">{{ analysis.priority }} priority · View analysis →</a>
+        </div>
 
         <div class="metric-line"></div>
 
@@ -1963,88 +1849,7 @@ footer {
      AI ANALYSIS
      ============================================================ -->
 
-<section class="card-panel">
-
-    <div class="panel-header">
-
-        <div class="panel-title">
-
-            <i class="fa-solid fa-brain"></i>
-
-            AI Intrusion Detection
-
-        </div>
-
-    </div>
-
-
-    <div class="ai-status">
-
-        <div class="ai-status-icon">
-
-            <i class="fa-solid fa-shield-virus"></i>
-
-        </div>
-
-
-        <div>
-
-            {% if classification == "SUSPICIOUS" %}
-
-                <div class="ai-title">
-                    SUSPICIOUS ACTIVITY
-                </div>
-
-                <div class="ai-description">
-
-                    The current activity exceeds the
-                    configured detection threshold.
-
-                </div>
-
-            {% else %}
-
-                <div
-                    class="ai-title"
-                    style="color:#4ade80;"
-                >
-
-                    NORMAL ACTIVITY
-
-                </div>
-
-                <div class="ai-description">
-
-                    The current activity is within
-                    the configured detection threshold.
-
-                </div>
-
-            {% endif %}
-
-        </div>
-
-    </div>
-
-
-    <div
-        style="
-        color:#7089a1;
-        font-size:12px;
-        line-height:1.7;
-        "
-    >
-
-        The dashboard analyzes events collected by the
-        Cowrie honeypot and classifies the observed
-        activity. The current prototype uses a
-        first-stage rule-based classification that
-        will be replaced with the project's trained
-        AI model.
-
-    </div>
-
-</section>
+{% include "ai_analysis.html" %}
 
 
 </div>
@@ -2116,7 +1921,7 @@ L.tileLayer(
    these can be replaced with actual geolocation results.
 */
 
-const attackerLocations = {{ attacker_locations | safe }};
+const attackerLocations = {{ attacker_locations | tojson }};
 
 
 attackerLocations.forEach(function(location) {
@@ -2183,10 +1988,10 @@ attackerLocations.forEach(function(location) {
    ============================================================ */
 
 const eventLabels =
-    {{ event_labels | safe }};
+    {{ event_labels | tojson }};
 
 const eventValues =
-    {{ event_values | safe }};
+    {{ event_values | tojson }};
 
 
 const ctx =
@@ -2273,10 +2078,12 @@ new Chart(ctx, {
    You can remove this if you don't want automatic refresh.
 */
 
-setTimeout(function() {
-
-    location.reload();
-
+setInterval(function() {
+    // Keep expanded evidence and keyboard focus intact while someone is reading.
+    if (document.visibilityState === "visible" &&
+        !document.querySelector("#ai-analysis details[open], #ai-analysis:focus-within")) {
+        location.reload();
+    }
 }, 60000);
 
 </script>
@@ -2457,7 +2264,9 @@ def logout():
 def dashboard():
     if not session.get("logged_in"):
         return redirect(url_for("login"))
-    events = load_events()
+    log_batch = load_event_log(LOG_FILE)
+    events = log_batch["events"]
+    analysis = analyze_events(events)
 
 
     # --------------------------------------------------------
@@ -2598,19 +2407,6 @@ def dashboard():
 
 
     # --------------------------------------------------------
-    # FIRST-STAGE CLASSIFICATION
-    # --------------------------------------------------------
-
-    if commands >= 5 or logins >= 3:
-
-        classification = "SUSPICIOUS"
-
-    else:
-
-        classification = "NORMAL"
-
-
-    # --------------------------------------------------------
     # MAP DATA
     # --------------------------------------------------------
     #
@@ -2745,7 +2541,9 @@ def dashboard():
 
         logins=logins,
 
-        classification=classification,
+        analysis=analysis,
+        log_batch=log_batch,
+        is_sample_data=Path(LOG_FILE).resolve() == (Path(__file__).resolve().parents[1] / "sample_data" / "cowrie.json"),
 
         source_ips=
             ip_counter.most_common(10),
@@ -2766,13 +2564,13 @@ def dashboard():
             max_command_count,
 
         attacker_locations=
-            json.dumps(attacker_locations),
+            attacker_locations,
 
         event_labels=
-            json.dumps(event_labels),
+            event_labels,
 
         event_values=
-            json.dumps(event_values),
+            event_values,
 
         current_time=
             current_time
