@@ -86,18 +86,26 @@ The interface uses a modern cybersecurity-inspired design with a dark theme, sec
 
 Dashboard components are developed using Python, Flask, HTML, CSS and JavaScript.
 
-### Dashboard Preview
+### 🌐 Live Dashboard
 
-Add an actual screenshot of the dashboard to:
+You can access our hosted dashboard here:
 
-`docs/images/dashboard.png`
+**[Open Our Honeypot AI Dashboard](https://honeypot-ai-intrusion-detection.onrender.com/#analytics)**
 
-Then uncomment the following line:
+The hosted dashboard currently uses demonstration data.
 
-<!-- ![Honeypot Dashboard](docs/images/dashboard.png) -->
+### 📸 Dashboard Overview
 
+![Honeypot AI Dashboard Overview](docs/images/dashboard-overview.png)
+
+*Our dashboard provides security summary cards, AI analysis, activity navigation, and monitoring information.*
+
+### 📊 Activity Records
+
+![Honeypot AI Activity Records](docs/images/dashboard-activity-records.png)
+
+*Our activity records section displays recorded events, source IP addresses, login attempts, and commonly observed commands.*
 ---
-
 # 🏗️ System Architecture
 
 The project uses several components to support honeypot monitoring and analysis.
