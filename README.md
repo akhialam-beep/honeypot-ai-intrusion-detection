@@ -99,12 +99,6 @@ The hosted dashboard currently uses demonstration data.
 ![Honeypot AI Dashboard Overview](docs/images/dashboard-overview.png)
 
 *Our dashboard provides security summary cards, AI analysis, activity navigation, and monitoring information.*
-
-### 📊 Activity Records
-
-![Honeypot AI Activity Records](docs/images/dashboard-activity-records.png)
-
-*Our activity records section displays recorded events, source IP addresses, login attempts, and commonly observed commands.*
 ---
 # 🏗️ System Architecture
 
