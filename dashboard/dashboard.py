@@ -13,6 +13,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ai.analyzer import analyze_events, load_event_log
 from auth_security import reserve_login_attempt, clear_login_attempts
+from live_data import register_live_data, load_live_data
 
 app = Flask(__name__)
 
@@ -28,6 +29,15 @@ app.config.update(
     LOGIN_ATTEMPT_LIMIT=10,
     LOGIN_WINDOW_SECONDS=60
 )
+
+app.config.update(
+    DATA_MODE=os.environ.get("DATA_MODE", "sample"),
+    INGEST_TOKEN=os.environ.get("INGEST_TOKEN", ""),
+    LIVE_DATA_DB=os.environ.get("LIVE_DATA_DB", os.path.join(app.instance_path, "live-events.sqlite3")),
+)
+if app.config["DATA_MODE"] not in {"sample", "live"}:
+    raise ValueError("DATA_MODE must be sample or live")
+register_live_data(app)
 
 DEMO_USERNAME = os.environ.get("DEMO_USERNAME", "demo")
 DEMO_PASSWORD_HASH = os.environ.get("DEMO_PASSWORD_HASH") or generate_password_hash(
@@ -1327,6 +1337,18 @@ footer {
 
 
 
+{% if live_mode %}
+<section class="hero-description" role="status">
+    <strong>MariaDB snapshot — latest 5,000 events maximum.</strong><br>
+    {% if log_batch.received_at %}
+        Last received (UTC): {{ log_batch.received_at }}.<br>
+        {{ "Updates delayed: no upload in over 3 minutes. Showing the last received snapshot." if log_batch.stale else "Receiving VM updates." }}
+    {% else %}
+        Waiting for the first VM upload. Sample events are not shown in live mode.
+    {% endif %}
+</section>
+{% endif %}
+
 <!-- ============================================================
      METRICS
      ============================================================ -->
@@ -2219,7 +2241,7 @@ def logout():
 def dashboard():
     if not session.get("logged_in"):
         return redirect(url_for("login"))
-    log_batch = load_event_log(LOG_FILE)
+    log_batch = load_live_data(app) if app.config["DATA_MODE"] == "live" else load_event_log(LOG_FILE)
     events = log_batch["events"]
     analysis = analyze_events(events)
 
@@ -2490,7 +2512,8 @@ def dashboard():
 
         analysis=analysis,
         log_batch=log_batch,
-        is_sample_data=Path(LOG_FILE).resolve() == (Path(__file__).resolve().parents[1] / "sample_data" / "cowrie.json"),
+        live_mode=app.config["DATA_MODE"] == "live",
+        is_sample_data=app.config["DATA_MODE"] == "sample" and Path(LOG_FILE).resolve() == (Path(__file__).resolve().parents[1] / "sample_data" / "cowrie.json"),
 
         source_ips=
             ip_counter.most_common(10),

@@ -1,9 +1,15 @@
 import json
 import mariadb
 import getpass
+from pathlib import Path
 
 # Ask for the MariaDB password securely
-db_password = getpass.getpass("Database password: ")
+password_file = Path("/home/cowrie/.config/cowrie-db-password")
+
+if password_file.is_file():
+    db_password = password_file.read_text().rstrip("\r\n")
+else:
+    db_password = getpass.getpass("Database password: ")
 
 # Connect to the Cowrie database
 conn = mariadb.connect(
@@ -16,7 +22,7 @@ conn = mariadb.connect(
 cursor = conn.cursor()
 
 # Cowrie JSON log file
-log_file = "var/log/cowrie/cowrie.json"
+log_file = "/home/cowrie/cowrie/var/log/cowrie/cowrie.json"
 
 inserted = 0
 
