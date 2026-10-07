@@ -5,8 +5,75 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from collections import Counter
 from pathlib import Path
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 import sqlite3
+import smtplib
+from email.message import EmailMessage
+from dotenv import load_dotenv
+
+def send_password_reset_email(recipient_email, reset_url):
+    """Send a password reset link using Gmail SMTP."""
+
+    mail_server = os.environ.get(
+        "MAIL_SERVER",
+        "smtp.gmail.com"
+    )
+
+    mail_port = int(
+        os.environ.get("MAIL_PORT", "587")
+    )
+
+    mail_username = os.environ.get("MAIL_USERNAME")
+    mail_password = os.environ.get("MAIL_PASSWORD")
+
+    if not mail_username or not mail_password:
+        raise RuntimeError(
+            "Email credentials are not configured."
+        )
+
+    message = EmailMessage()
+
+    message["Subject"] = (
+        "SugarCoated Security Password Reset"
+    )
+
+    message["From"] = mail_username
+    message["To"] = recipient_email
+
+    message.set_content(
+        f"""SugarCoated Security
+
+A password reset was requested for your account.
+
+Use the secure link below to create a new password:
+
+{reset_url}
+
+This link expires in 15 minutes and can only be used once.
+
+If you did not request this password reset, you can ignore this email.
+
+SugarCoated Security
+Let's Get Sticky
+"""
+    )
+
+    with smtplib.SMTP(
+        mail_server,
+        mail_port,
+        timeout=15
+    ) as smtp:
+
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.ehlo()
+
+        smtp.login(
+            mail_username,
+            mail_password
+        )
+
+        smtp.send_message(message)
 
 # Keep the documented `python dashboard/dashboard.py` entry point working.
 if __package__ in {None, ""}:
@@ -14,6 +81,16 @@ if __package__ in {None, ""}:
 from ai.analyzer import analyze_events, load_event_log
 from auth_security import reserve_login_attempt, clear_login_attempts
 from live_data import register_live_data, load_live_data
+from user_accounts import (
+    init_user_db,
+    authenticate_user,
+    get_user_by_username,
+    change_user_password,
+    add_email_support,
+    get_user_by_email,
+    save_reset_token,
+    reset_password_with_token
+)
 
 app = Flask(__name__)
 
@@ -26,9 +103,13 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
     MAX_CONTENT_LENGTH=8192,
     LOGIN_THROTTLE_DB=os.environ.get("LOGIN_THROTTLE_DB", os.path.join(app.instance_path, "login-attempts.sqlite3")),
+    USER_DB=os.environ.get("USER_DB", os.path.join(os.path.dirname(__file__), "users.db")),
     LOGIN_ATTEMPT_LIMIT=10,
     LOGIN_WINDOW_SECONDS=60
 )
+   
+init_user_db(app.config["USER_DB"])
+add_email_support(app.config["USER_DB"])
 
 app.config.update(
     DATA_MODE=os.environ.get("DATA_MODE", "sample"),
@@ -58,6 +139,29 @@ def require_csrf():
 
 
 app.jinja_env.globals["csrf_token"] = csrf_token
+@app.before_request
+def enforce_session_timeout():
+    """Sign users out after 30 minutes of inactivity."""
+
+    if not session.get("logged_in"):
+        return
+
+    now = datetime.now()
+    last_activity = session.get("last_activity")
+
+    if last_activity:
+        try:
+            last_activity_time = datetime.fromisoformat(last_activity)
+
+            if now - last_activity_time > timedelta(minutes=30):
+                session.clear()
+                return redirect(url_for("login"))
+
+        except ValueError:
+            session.clear()
+            return redirect(url_for("login"))
+
+    session["last_activity"] = now.isoformat()
 
 
 @app.after_request
@@ -68,7 +172,72 @@ def protect_private_responses(response):
     response.headers["Referrer-Policy"] = "same-origin"
     return response
 
+def get_all_users(db_path):
+    """Return all SugarCoated Security user accounts."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
 
+        users = conn.execute(
+            """
+            SELECT id, username, display_name, role,
+                   is_active, created_at
+            FROM users
+            ORDER BY id
+            """
+        ).fetchall()
+
+    return [dict(user) for user in users]
+
+
+def create_dashboard_user(
+    db_path,
+    username,
+    password,
+    display_name,
+    role="viewer"
+):
+    """Create a user from the admin dashboard."""
+
+    if role not in {"admin", "analyst", "viewer"}:
+        raise ValueError("Invalid account role.")
+
+    password_hash = generate_password_hash(password)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO users
+            (username, password_hash, display_name, role)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                username,
+                password_hash,
+                display_name,
+                role
+            )
+        )
+
+        conn.commit()
+
+
+def set_user_status(db_path, user_id, active):
+    """Enable or disable a user account."""
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE users
+            SET is_active = ?
+            WHERE id = ?
+            """,
+            (
+                1 if active else 0,
+                user_id
+            )
+        )
+
+        conn.commit()
 EVENT_LABELS = {
     "cowrie.command.input": "Command entered",
     "cowrie.login.failed": "Failed login",
@@ -825,8 +994,17 @@ body {
 
 
 .leaflet-container {
-
-    background: #07111f;
+    background:
+        radial-gradient(
+            circle at 50% 45%,
+            rgba(14, 165, 233, 0.15),
+            transparent 40%
+        ),
+        linear-gradient(
+            135deg,
+            #071b2e,
+            #030b15
+        );
 }
 
 
@@ -1249,6 +1427,10 @@ footer {
             <i class="fa-solid fa-location-dot"></i>
             IP Map
         </a>
+       <a class="nav-link" href="{{ url_for('profile') }}">
+    <i class="fa-solid fa-user-shield"></i>
+    Profile
+</a> 
 
     </div>
 
@@ -1863,29 +2045,73 @@ footer {
    MAP
    ============================================================ */
 
-const map = L.map("map").setView([25, 10], 2);
+const map = L.map("map", {
+    center: [20, 0],
+    zoom: 2,
+    minZoom: 1,
+    maxZoom: 8,
+    worldCopyJump: true,
+    zoomControl: true
+});
+
+// Load the world map from our own project.
+// No external map tile provider or API key is required.
+fetch("{{ url_for('static', filename='countries.geo.json') }}")
+    .then(response => {
+        if (!response.ok) {
+            throw new Error("World map could not be loaded.");
+        }
+
+        return response.json();
+    })
+    .then(worldData => {
+
+        const worldLayer = L.geoJSON(worldData, {
+
+            style: function() {
+                return {
+                    color: "#2684b8",
+                    weight: 1,
+                    opacity: 0.75,
+                    fillColor: "#0b2940",
+                    fillOpacity: 0.85
+                };
+            },
+
+            onEachFeature: function(feature, layer) {
+
+                if (
+                    feature.properties &&
+                    feature.properties.name
+                ) {
+                    layer.bindTooltip(
+                        feature.properties.name,
+                        {
+                            sticky: true
+                        }
+                    );
+                }
+            }
+
+        }).addTo(map);
+
+        map.fitBounds(
+            worldLayer.getBounds(),
+            {
+                padding: [10, 10]
+            }
+        );
+    })
+    .catch(error => {
+        console.error(
+            "World map error:",
+            error
+        );
+    });
 
 
-L.tileLayer(
-    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {
-        attribution: "&copy; OpenStreetMap contributors",
-        maxZoom: 18
-    }
-).addTo(map);
-
-
-/*
-   These coordinates are demo fallback locations.
-
-   They allow the dashboard to show the map while your
-   project is using sample_data.
-
-   When you connect a real IP geolocation service later,
-   these can be replaced with actual geolocation results.
-*/
-
-const attackerLocations = {{ attacker_locations | tojson }};
+const attackerLocations =
+    {{ attacker_locations | tojson }};
 
 
 attackerLocations.forEach(function(location) {
@@ -1918,11 +2144,11 @@ attackerLocations.forEach(function(location) {
 
     .bindPopup(`
 
-        <div style="min-width:180px">
+        <div style="min-width:190px">
 
             <strong>
                 <i class="fa-solid fa-triangle-exclamation"></i>
-                Example connection
+                Source IP Activity
             </strong>
 
             <br><br>
@@ -1937,7 +2163,7 @@ attackerLocations.forEach(function(location) {
 
             <br>
 
-            <strong>Example location (preset):</strong>
+            <strong>Location:</strong>
             ${location.location}
 
         </div>
@@ -1945,6 +2171,7 @@ attackerLocations.forEach(function(location) {
     `);
 
 });
+
 
 
 /* ============================================================
@@ -2057,6 +2284,917 @@ setInterval(function() {
 
 </html>
 
+"""
+PROFILE_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SugarCoated Security | My Profile</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            background: radial-gradient(circle at top, #10243c 0%, #040b16 55%);
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 40px;
+            background: #07111f;
+            border-bottom: 1px solid rgba(255,255,255,.12);
+        }
+
+        .brand {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .brand span {
+            color: #63b3ff;
+        }
+
+        .back-button {
+            color: white;
+            text-decoration: none;
+            padding: 10px 16px;
+            border: 1px solid #3288d8;
+            border-radius: 8px;
+        }
+
+        .container {
+            width: min(760px, 92%);
+            margin: 60px auto;
+        }
+
+        .profile-card {
+            padding: 35px;
+            border: 1px solid rgba(99,179,255,.35);
+            border-radius: 18px;
+            background: rgba(10,25,44,.94);
+        }
+
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .avatar {
+            width: 76px;
+            height: 76px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #3288d8;
+            font-size: 30px;
+            font-weight: bold;
+        }
+
+        h1 {
+            margin: 0 0 6px;
+        }
+
+        .role {
+            color: #63b3ff;
+            text-transform: capitalize;
+        }
+
+        .profile-row {
+            padding: 18px 0;
+            border-top: 1px solid rgba(255,255,255,.10);
+        }
+
+        .label {
+            color: #8fa6bd;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+
+        .value {
+            font-size: 17px;
+        }
+
+        .active {
+            color: #69e6a6;
+            font-weight: bold;
+        }
+
+        .security {
+            margin-top: 28px;
+            padding: 22px;
+            border-radius: 12px;
+            background: rgba(50,136,216,.08);
+            border: 1px solid rgba(50,136,216,.25);
+        }
+    </style>
+</head>
+
+<body>
+
+<nav class="navbar">
+    <div class="brand">
+        SugarCoated <span>Security</span>
+    </div>
+
+    <a class="back-button" href="{{ url_for('dashboard') }}">
+        Back to Dashboard
+    </a>
+</nav>
+
+<main class="container">
+
+    <div class="profile-card">
+
+        <div class="profile-header">
+
+            <div class="avatar">
+                {{ user.display_name[0] | upper }}
+            </div>
+
+            <div>
+                <h1>{{ user.display_name }}</h1>
+                <div class="role">
+                    {{ user.role }}
+                </div>
+            </div>
+
+        </div>
+
+        <div class="profile-row">
+            <div class="label">DISPLAY NAME</div>
+            <div class="value">{{ user.display_name }}</div>
+        </div>
+
+        <div class="profile-row">
+            <div class="label">USERNAME</div>
+            <div class="value">{{ user.username }}</div>
+        </div>
+
+        <div class="profile-row">
+            <div class="label">ROLE</div>
+            <div class="value">{{ user.role | capitalize }}</div>
+        </div>
+
+        <div class="profile-row">
+            <div class="label">ACCOUNT STATUS</div>
+
+            {% if user.is_active %}
+                <div class="value active">● Active</div>
+            {% else %}
+                <div class="value">Inactive</div>
+            {% endif %}
+        </div>
+
+        <div class="security">
+            <h2>Account Security</h2>
+            <p>
+                Individual database-backed account authentication is enabled.
+            </p>
+            <a href="{{ url_for('change_password') }}"
+   style="
+       display:inline-block;
+       margin-top:16px;
+       padding:10px 16px;
+       background:#3288d8;
+       color:white;
+       text-decoration:none;
+       border-radius:8px;
+   ">
+    Change Password
+</a>
+
+{% if user.role == "admin" %}
+<a href="{{ url_for('admin_users') }}"
+   style="
+       display:inline-block;
+       margin-top:16px;
+       margin-left:8px;
+       padding:10px 16px;
+       border:1px solid #3288d8;
+       color:white;
+       text-decoration:none;
+       border-radius:8px;
+   ">
+    Manage Users
+</a>
+{% endif %}
+        </div>
+
+    </div>
+
+</main>
+
+</body>
+</html>
+"""
+
+ADMIN_USERS_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SugarCoated Security | User Management</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at top, #10243c 0%, #040b16 55%);
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 40px;
+            background: #07111f;
+            border-bottom: 1px solid rgba(255,255,255,.12);
+        }
+
+        .brand {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .brand span { color: #63b3ff; }
+
+        .nav-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 10px 16px;
+            border: 1px solid #3288d8;
+            border-radius: 8px;
+            background: #3288d8;
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .button.secondary {
+            background: transparent;
+        }
+
+        .container {
+            width: min(1100px, 94%);
+            margin: 50px auto;
+        }
+
+        .heading {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+        }
+
+        h1 { margin: 0; }
+
+        .subtitle {
+            color: #8fa6bd;
+            margin-top: 7px;
+        }
+
+        .card {
+            background: rgba(10,25,44,.94);
+            border: 1px solid rgba(99,179,255,.30);
+            border-radius: 18px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            padding: 16px;
+            text-align: left;
+            color: #8fa6bd;
+            font-size: 12px;
+            background: #071524;
+        }
+
+        td {
+            padding: 17px 16px;
+            border-top: 1px solid rgba(255,255,255,.08);
+        }
+
+        .role {
+            display: inline-block;
+            padding: 6px 10px;
+            border-radius: 20px;
+            background: rgba(50,136,216,.15);
+            color: #63b3ff;
+            text-transform: capitalize;
+        }
+
+        .active {
+            color: #69e6a6;
+            font-weight: bold;
+        }
+
+        .inactive {
+            color: #ff858d;
+            font-weight: bold;
+        }
+
+        .small-button {
+            border: 1px solid #3288d8;
+            border-radius: 7px;
+            padding: 7px 11px;
+            background: transparent;
+            color: #63b3ff;
+            cursor: pointer;
+        }
+
+        .small-button:hover {
+            background: #3288d8;
+            color: white;
+        }
+
+        @media(max-width: 700px) {
+            .navbar, .heading {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+
+            .card {
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<nav class="navbar">
+
+    <div class="brand">
+        SugarCoated <span>Security</span>
+    </div>
+
+    <div class="nav-actions">
+
+        <a class="button secondary"
+           href="{{ url_for('profile') }}">
+            My Profile
+        </a>
+
+        <a class="button secondary"
+           href="{{ url_for('dashboard') }}">
+            Dashboard
+        </a>
+
+    </div>
+
+</nav>
+
+
+<main class="container">
+
+    <div class="heading">
+
+        <div>
+            <h1>User Management</h1>
+
+            <div class="subtitle">
+                Manage SugarCoated Security access and roles.
+            </div>
+        </div>
+
+        <a class="button"
+           href="{{ url_for('create_user') }}">
+            + Create Account
+        </a>
+
+    </div>
+
+
+    <div class="card">
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>DISPLAY NAME</th>
+                    <th>USERNAME</th>
+                    <th>ROLE</th>
+                    <th>STATUS</th>
+                    <th>CREATED</th>
+                    <th>ACTION</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+            {% for account in users %}
+
+                <tr>
+
+                    <td>
+                        {{ account.display_name }}
+                    </td>
+
+                    <td>
+                        {{ account.username }}
+                    </td>
+
+                    <td>
+                        <span class="role">
+                            {{ account.role }}
+                        </span>
+                    </td>
+
+                    <td>
+
+                        {% if account.is_active %}
+
+                            <span class="active">
+                                ● Active
+                            </span>
+
+                        {% else %}
+
+                            <span class="inactive">
+                                ● Disabled
+                            </span>
+
+                        {% endif %}
+
+                    </td>
+
+                    <td>
+                        {{ account.created_at }}
+                    </td>
+
+                    <td>
+
+                    {% if account.id == session.get("user_id") %}
+
+                        Current account
+
+                    {% else %}
+
+                        <form
+                            method="POST"
+                            action="{{ url_for('toggle_user', user_id=account.id) }}"
+                        >
+
+                            <input
+                                type="hidden"
+                                name="csrf_token"
+                                value="{{ csrf_token() }}"
+                            >
+
+                            {% if account.is_active %}
+
+                                <input
+                                    type="hidden"
+                                    name="active"
+                                    value="0"
+                                >
+
+                                <button
+                                    class="small-button"
+                                    type="submit"
+                                >
+                                    Disable
+                                </button>
+
+                            {% else %}
+
+                                <input
+                                    type="hidden"
+                                    name="active"
+                                    value="1"
+                                >
+
+                                <button
+                                    class="small-button"
+                                    type="submit"
+                                >
+                                    Enable
+                                </button>
+
+                            {% endif %}
+
+                        </form>
+
+                    {% endif %}
+
+                    </td>
+
+                </tr>
+
+            {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</main>
+
+</body>
+</html>
+"""
+
+
+CREATE_USER_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        SugarCoated Security | Create Account
+    </title>
+
+    <style>
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+
+            background:
+                radial-gradient(
+                    circle at top,
+                    #10243c 0%,
+                    #040b16 55%
+                );
+
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        .card {
+            width: min(500px, 92%);
+            padding: 35px;
+            background: rgba(10,25,44,.96);
+            border: 1px solid rgba(99,179,255,.35);
+            border-radius: 18px;
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        .subtitle {
+            color: #8fa6bd;
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin: 15px 0 7px;
+            color: #b9d5ed;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 12px 13px;
+            border-radius: 9px;
+            border: 1px solid #24435f;
+            background: #071524;
+            color: white;
+        }
+
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: #38bdf8;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 24px;
+            padding: 13px;
+            border: 0;
+            border-radius: 9px;
+            background:
+                linear-gradient(
+                    90deg,
+                    #20bfff,
+                    #7067ff
+                );
+            color: white;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .error {
+            padding: 11px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            background: rgba(255,94,104,.12);
+            color: #ff858d;
+        }
+
+        .back {
+            display: block;
+            margin-top: 18px;
+            text-align: center;
+            color: #63b3ff;
+            text-decoration: none;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+<form class="card" method="POST">
+
+    <input
+        type="hidden"
+        name="csrf_token"
+        value="{{ csrf_token() }}"
+    >
+
+    <h1>Create Account</h1>
+
+    <div class="subtitle">
+        Add a SugarCoated Security team member.
+    </div>
+
+
+    {% if error %}
+
+        <div class="error">
+            {{ error }}
+        </div>
+
+    {% endif %}
+
+
+    <label>
+        Display Name
+    </label>
+
+    <input
+        name="display_name"
+        required
+        maxlength="100"
+    >
+
+
+    <label>
+        Username
+    </label>
+
+    <input
+        name="username"
+        required
+        maxlength="128"
+        autocomplete="off"
+    >
+
+
+    <label>
+        Temporary Password
+    </label>
+
+    <input
+        name="password"
+        type="password"
+        required
+        minlength="12"
+        autocomplete="new-password"
+    >
+
+
+    <label>
+        Account Role
+    </label>
+
+    <select name="role">
+
+        <option value="viewer">
+            Viewer
+        </option>
+
+        <option value="analyst">
+            Analyst
+        </option>
+
+        <option value="admin">
+            Administrator
+        </option>
+
+    </select>
+
+
+    <button type="submit">
+        Create Account
+    </button>
+
+
+    <a
+        class="back"
+        href="{{ url_for('admin_users') }}"
+    >
+        ← Back to User Management
+    </a>
+
+</form>
+
+</body>
+</html>
+"""
+CHANGE_PASSWORD_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SugarCoated Security | Change Password</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at top, #10243c 0%, #040b16 55%);
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        .card {
+            width: min(500px, 92%);
+            padding: 35px;
+            background: rgba(10,25,44,.96);
+            border: 1px solid rgba(99,179,255,.35);
+            border-radius: 18px;
+        }
+
+        h1 { margin-top: 0; }
+
+        .subtitle {
+            color: #8fa6bd;
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin: 16px 0 7px;
+            color: #b9d5ed;
+        }
+
+        input {
+            width: 100%;
+            padding: 13px;
+            border-radius: 9px;
+            border: 1px solid #24435f;
+            background: #071524;
+            color: white;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #38bdf8;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 24px;
+            padding: 13px;
+            border: 0;
+            border-radius: 9px;
+            background: linear-gradient(90deg, #20bfff, #7067ff);
+            color: white;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .message {
+            padding: 11px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+        }
+
+        .error {
+            background: rgba(255,94,104,.12);
+            color: #ff858d;
+        }
+
+        .success {
+            background: rgba(105,230,166,.12);
+            color: #69e6a6;
+        }
+
+        .back {
+            display: block;
+            margin-top: 18px;
+            text-align: center;
+            color: #63b3ff;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+
+<form class="card" method="POST">
+
+    <input type="hidden"
+           name="csrf_token"
+           value="{{ csrf_token() }}">
+
+    <h1>Change Password</h1>
+
+    <div class="subtitle">
+        Update your SugarCoated Security credentials.
+    </div>
+
+    {% if error %}
+        <div class="message error">{{ error }}</div>
+    {% endif %}
+
+    {% if success %}
+        <div class="message success">{{ success }}</div>
+    {% endif %}
+
+    <label>Current Password</label>
+    <input
+        name="current_password"
+        type="password"
+        required
+        autocomplete="current-password"
+    >
+
+    <label>New Password</label>
+    <input
+        name="new_password"
+        type="password"
+        required
+        minlength="12"
+        autocomplete="new-password"
+    >
+
+    <label>Confirm New Password</label>
+    <input
+        name="confirm_password"
+        type="password"
+        required
+        minlength="12"
+        autocomplete="new-password"
+    >
+
+    <button type="submit">
+        Update Password
+    </button>
+
+    <a class="back" href="{{ url_for('profile') }}">
+        ← Back to My Profile
+    </a>
+
+</form>
+
+</body>
+</html>
 """
 
 LOGIN_PAGE = """
@@ -2183,6 +3321,16 @@ LOGIN_PAGE = """
                required maxlength="1024" autocomplete="current-password">
 
         <button type="submit">Sign In</button>
+        <a href="{{ url_for('forgot_password') }}"
+   style="
+       display:block;
+       margin-top:18px;
+       text-align:center;
+       color:#63b3ff;
+       text-decoration:none;
+   ">
+    Forgot Password?
+</a>
     </form>
 </body>
 </html>
@@ -2193,38 +3341,698 @@ LOGIN_PAGE = """
 def login():
     if session.get("logged_in"):
         return redirect(url_for("dashboard"))
+
     error = None
+
     if request.method == "POST":
         require_csrf()
+
         username = request.form.get("username", "")
         password = request.form.get("password", "")
+
         if len(username) > 128 or len(password) > 1024:
             abort(400, "Username or password is too long.")
-        valid_username = secrets.compare_digest(username.encode(), DEMO_USERNAME.encode())
-        # Account-level buckets cannot be bypassed by forging proxy/IP headers.
+
+        # Check whether this username exists in the user database.
+        user = get_user_by_username(
+            app.config["USER_DB"],
+            username
+        )
+
+        valid_username = user is not None
         bucket = "account" if valid_username else "unknown"
+
+        # Preserve the team's existing login throttling.
         try:
-            retry = reserve_login_attempt(app.config["LOGIN_THROTTLE_DB"], bucket,
-                                          app.config["LOGIN_ATTEMPT_LIMIT"], app.config["LOGIN_WINDOW_SECONDS"])
+            retry = reserve_login_attempt(
+                app.config["LOGIN_THROTTLE_DB"],
+                bucket,
+                app.config["LOGIN_ATTEMPT_LIMIT"],
+                app.config["LOGIN_WINDOW_SECONDS"],
+            )
         except sqlite3.Error:
-            return render_template_string(LOGIN_PAGE, error="Sign-in is temporarily unavailable. Please try again shortly."), 503
+            return render_template_string(
+                LOGIN_PAGE,
+                error="Sign-in is temporarily unavailable. Please try again shortly.",
+            ), 503
+
         if retry:
-            response = make_response(render_template_string(LOGIN_PAGE, error=f"Too many sign-in attempts. Try again in {retry} seconds."), 429)
+            response = make_response(
+                render_template_string(
+                    LOGIN_PAGE,
+                    error=f"Too many sign-in attempts. Try again in {retry} seconds.",
+                ),
+                429,
+            )
             response.headers["Retry-After"] = str(retry)
             return response
-        valid_password = check_password_hash(DEMO_PASSWORD_HASH, password)
-        if valid_username and valid_password:
-            clear_login_attempts(app.config["LOGIN_THROTTLE_DB"], bucket)
+
+        # Authenticate against the individual user account database.
+        authenticated_user = authenticate_user(
+            app.config["USER_DB"],
+            username,
+            password,
+        )
+
+        if authenticated_user:
+            clear_login_attempts(
+                app.config["LOGIN_THROTTLE_DB"],
+                bucket,
+            )
+
             session.clear()
             session.permanent = True
             session["logged_in"] = True
-            session["username"] = username
+            session["user_id"] = authenticated_user["id"]
+            session["username"] = authenticated_user["username"]
+            session["display_name"] = authenticated_user["display_name"]
+            session["role"] = authenticated_user["role"]
+
             csrf_token()
+
             return redirect(url_for("dashboard"))
+
         error = "Incorrect username or password."
+
     return render_template_string(LOGIN_PAGE, error=error)
+@app.route("/profile")
+def profile():
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
+
+    user = get_user_by_username(
+        app.config["USER_DB"],
+        session.get("username")
+    )
+
+    if not user:
+        session.clear()
+        return redirect(url_for("login"))
+
+    return render_template_string(
+        PROFILE_PAGE,
+        user=user
+    )
 
 
+@app.route("/change-password", methods=["GET", "POST"])
+def change_password():
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
+
+    error = None
+    success = None
+
+    if request.method == "POST":
+        require_csrf()
+
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        user = get_user_by_username(
+            app.config["USER_DB"],
+            session.get("username")
+        )
+
+        if not user or not check_password_hash(
+            user["password_hash"], current_password
+        ):
+            error = "Current password is incorrect."
+
+        elif len(new_password) < 8:
+            error = "New password must be at least 8 characters."
+
+        elif new_password != confirm_password:
+            error = "New passwords do not match."
+
+        else:
+            change_user_password(
+                app.config["USER_DB"],
+                session.get("username"),
+                new_password
+            )
+            success = "Password changed successfully."
+
+    return render_template_string(
+        CHANGE_PASSWORD_PAGE,
+        error=error,
+        success=success
+    )
+@app.route("/admin/users")
+def admin_users():
+
+    # User must be signed in.
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
+
+    # Only administrators can manage accounts.
+    if session.get("role") != "admin":
+        abort(403)
+
+    users = get_all_users(
+        app.config["USER_DB"]
+    )
+
+    return render_template_string(
+        ADMIN_USERS_PAGE,
+        users=users
+    )
+
+
+@app.route("/admin/users/create", methods=["GET", "POST"])
+def create_user():
+
+    # User must be signed in.
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
+
+    # Only administrators can create accounts.
+    if session.get("role") != "admin":
+        abort(403)
+
+    error = None
+
+    if request.method == "POST":
+
+        require_csrf()
+
+        display_name = request.form.get(
+            "display_name",
+            ""
+        ).strip()
+
+        username = request.form.get(
+            "username",
+            ""
+        ).strip()
+
+        password = request.form.get(
+            "password",
+            ""
+        )
+
+        role = request.form.get(
+            "role",
+            "viewer"
+        )
+
+
+        if not display_name or not username or not password:
+
+            error = "All fields are required."
+
+
+        elif len(password) < 12:
+
+            error = (
+                "Temporary password must be "
+                "at least 12 characters."
+            )
+
+
+        elif role not in {
+            "admin",
+            "analyst",
+            "viewer"
+        }:
+
+            error = "Invalid account role."
+
+
+        else:
+
+            try:
+
+                create_dashboard_user(
+                    app.config["USER_DB"],
+                    username,
+                    password,
+                    display_name,
+                    role
+                )
+
+                return redirect(
+                    url_for("admin_users")
+                )
+
+
+            except sqlite3.IntegrityError:
+
+                error = (
+                    "That username already exists."
+                )
+
+
+    return render_template_string(
+        CREATE_USER_PAGE,
+        error=error
+    )
+
+
+@app.route(
+    "/admin/users/<int:user_id>/status",
+    methods=["POST"]
+)
+def toggle_user(user_id):
+
+    # User must be signed in.
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
+
+    # Only administrators can enable/disable accounts.
+    if session.get("role") != "admin":
+        abort(403)
+
+    require_csrf()
+
+    # Prevent an administrator from disabling
+    # the account they are currently using.
+    if user_id == session.get("user_id"):
+
+        abort(
+            400,
+            "You cannot disable your own signed-in account."
+        )
+
+
+    active = (
+        request.form.get("active") == "1"
+    )
+
+    set_user_status(
+        app.config["USER_DB"],
+        user_id,
+        active
+    )
+
+    return redirect(
+        url_for("admin_users")
+    )
+
+FORGOT_PASSWORD_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SugarCoated Security | Forgot Password</title>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at top, #10243c 0%, #040b16 55%);
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        .card {
+            width: min(480px, 92%);
+            padding: 35px;
+            background: rgba(10,25,44,.96);
+            border: 1px solid rgba(99,179,255,.35);
+            border-radius: 18px;
+        }
+
+        h1 { margin-top: 0; }
+
+        .subtitle {
+            color: #8fa6bd;
+            margin-bottom: 25px;
+            line-height: 1.5;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #b9d5ed;
+        }
+
+        input {
+            width: 100%;
+            padding: 13px;
+            border-radius: 9px;
+            border: 1px solid #24435f;
+            background: #071524;
+            color: white;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 24px;
+            padding: 13px;
+            border: 0;
+            border-radius: 9px;
+            background: linear-gradient(90deg, #20bfff, #7067ff);
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .message {
+            margin-bottom: 18px;
+            padding: 12px;
+            border-radius: 8px;
+            background: rgba(105,230,166,.12);
+            color: #69e6a6;
+        }
+
+        .back {
+            display: block;
+            margin-top: 20px;
+            text-align: center;
+            color: #63b3ff;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+
+<form class="card" method="POST">
+
+    <input
+        type="hidden"
+        name="csrf_token"
+        value="{{ csrf_token() }}"
+    >
+
+    <h1>Forgot Password?</h1>
+
+    <div class="subtitle">
+        Enter the email address associated with your
+        SugarCoated Security account.
+    </div>
+
+    {% if message %}
+        <div class="message">{{ message }}</div>
+    {% endif %}
+
+    <label>Email Address</label>
+
+    <input
+        type="email"
+        name="email"
+        placeholder="name@example.com"
+        autocomplete="email"
+        required
+    >
+
+    <button type="submit">
+        Send Reset Link
+    </button>
+
+    <a class="back" href="{{ url_for('login') }}">
+        ← Return to Login
+    </a>
+
+</form>
+
+</body>
+</html>
+"""
+RESET_PASSWORD_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>SugarCoated Security | Reset Password</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(
+                circle at top,
+                #10243c 0%,
+                #040b16 55%
+            );
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        .card {
+            width: min(480px, 92%);
+            padding: 35px;
+            background: rgba(10,25,44,.96);
+            border: 1px solid rgba(99,179,255,.35);
+            border-radius: 18px;
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        .subtitle {
+            color: #8fa6bd;
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin: 16px 0 7px;
+            color: #b9d5ed;
+        }
+
+        input {
+            width: 100%;
+            padding: 13px;
+            border-radius: 9px;
+            border: 1px solid #24435f;
+            background: #071524;
+            color: white;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 24px;
+            padding: 13px;
+            border: 0;
+            border-radius: 9px;
+            background: linear-gradient(
+                90deg,
+                #20bfff,
+                #7067ff
+            );
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .message {
+            padding: 12px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+        }
+
+        .error {
+            background: rgba(255,94,104,.12);
+            color: #ff858d;
+        }
+
+        .success {
+            background: rgba(105,230,166,.12);
+            color: #69e6a6;
+        }
+
+        .back {
+            display: block;
+            margin-top: 20px;
+            text-align: center;
+            color: #63b3ff;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+
+<form class="card" method="POST">
+
+    <input
+        type="hidden"
+        name="csrf_token"
+        value="{{ csrf_token() }}"
+    >
+
+    <h1>Create New Password</h1>
+
+    <div class="subtitle">
+        Enter a new password for your SugarCoated Security account.
+    </div>
+
+    {% if error %}
+        <div class="message error">
+            {{ error }}
+        </div>
+    {% endif %}
+
+    {% if success %}
+        <div class="message success">
+            {{ success }}
+        </div>
+    {% endif %}
+
+    {% if not success %}
+
+        <label>New Password</label>
+
+        <input
+            type="password"
+            name="new_password"
+            minlength="12"
+            autocomplete="new-password"
+            required
+        >
+
+        <label>Confirm New Password</label>
+
+        <input
+            type="password"
+            name="confirm_password"
+            minlength="12"
+            autocomplete="new-password"
+            required
+        >
+
+        <button type="submit">
+            Reset Password
+        </button>
+
+    {% endif %}
+
+    <a class="back" href="{{ url_for('login') }}">
+        ← Return to Login
+    </a>
+
+</form>
+
+</body>
+</html>
+"""
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+
+    error = None
+    success = None
+
+    if request.method == "POST":
+        require_csrf()
+
+        new_password = request.form.get(
+            "new_password",
+            ""
+        )
+
+        confirm_password = request.form.get(
+            "confirm_password",
+            ""
+        )
+
+        if len(new_password) < 12:
+            error = "Password must be at least 12 characters."
+
+        elif new_password != confirm_password:
+            error = "Passwords do not match."
+
+        else:
+            changed = reset_password_with_token(
+                app.config["USER_DB"],
+                token,
+                new_password
+            )
+
+            if changed:
+                success = (
+                    "Password reset successfully. "
+                    "You can now return to login."
+                )
+            else:
+                error = (
+                    "This password reset link is invalid or has expired."
+                )
+
+    return render_template_string(
+        RESET_PASSWORD_PAGE,
+        error=error,
+        success=success
+    )
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    message = None
+
+    if request.method == "POST":
+        require_csrf()
+
+        email = request.form.get(
+            "email",
+            ""
+        ).strip().lower()
+
+        user = get_user_by_email(
+            app.config["USER_DB"],
+            email
+        )
+
+        if user:
+            reset_token = secrets.token_urlsafe(32)
+
+            reset_expires = (
+                datetime.now()
+                + timedelta(minutes=15)
+            )
+
+            save_reset_token(
+                app.config["USER_DB"],
+                user["id"],
+                reset_token,
+                reset_expires
+            )
+
+            reset_url = url_for(
+                "reset_password",
+                token=reset_token,
+                _external=True
+            )
+
+            try:
+                send_password_reset_email(
+                    user["email"],
+                    reset_url
+                )
+
+            except Exception as exc:
+                app.logger.error(
+                    "Password reset email failed: %s",
+                    exc
+                )
+
+        message = (
+            "If an account exists for that email address, "
+            "a password reset link has been sent."
+        )
+
+    return render_template_string(
+        FORGOT_PASSWORD_PAGE,
+        message=message
+    )
 @app.route("/logout", methods=["POST"])
 def logout():
     require_csrf()
@@ -2241,10 +4049,10 @@ def logout():
 def dashboard():
     if not session.get("logged_in"):
         return redirect(url_for("login"))
+
     log_batch = load_live_data(app) if app.config["DATA_MODE"] == "live" else load_event_log(LOG_FILE)
     events = log_batch["events"]
     analysis = analyze_events(events)
-
 
     # --------------------------------------------------------
     # BASIC COUNTERS
@@ -2252,104 +4060,39 @@ def dashboard():
 
     total_events = len(events)
 
+    commands = sum(
+        1 for e in events
+        if e.get("eventid") == "cowrie.command.input"
+    )
 
-    command_events = [
-
-        event
-
-        for event in events
-
-        if event.get("eventid")
-        == "cowrie.command.input"
-
-    ]
-
-
-    login_events_raw = [
-
-        event
-
-        for event in events
-
-        if event.get("eventid")
-        in [
+    logins = sum(
+        1 for e in events
+        if e.get("eventid") in (
             "cowrie.login.success",
             "cowrie.login.failed"
-        ]
-
-    ]
-
-
-    commands = len(command_events)
-
-    logins = len(login_events_raw)
-
-
-    # --------------------------------------------------------
-    # COMMAND COUNTER
-    # --------------------------------------------------------
-
-    command_counter = Counter(
-
-        event.get(
-            "input",
-            "Unknown"
         )
-
-        for event in command_events
-
     )
-
-
-    # --------------------------------------------------------
-    # IP COUNTER
-    # --------------------------------------------------------
 
     ip_counter = Counter(
-
-        event.get(
-            "src_ip",
-            "Unknown"
-        )
-
-        for event in events
-
-        if event.get("src_ip")
-
+        e.get("src_ip")
+        for e in events
+        if e.get("src_ip")
     )
 
+    command_counter = Counter(
+        e.get("input")
+        for e in events
+        if e.get("eventid") == "cowrie.command.input"
+        and e.get("input")
+    )
 
-    # --------------------------------------------------------
-    # LOGIN EVENTS
-    # --------------------------------------------------------
-
-    login_events = []
-
-
-    for event in login_events_raw:
-
-        login_events.append({
-
-            "username":
-                event.get(
-                    "username",
-                    "N/A"
-                ),
-
-            "ip":
-                event.get(
-                    "src_ip",
-                    "N/A"
-                ),
-
-            "event":
-                event.get(
-                    "eventid",
-                    "N/A"
-                )
-
-        })
-
+    login_events = [
+        e for e in events
+        if e.get("eventid") in (
+            "cowrie.login.success",
+            "cowrie.login.failed"
+        )
+    ]
 
     # --------------------------------------------------------
     # RECENT EVENTS
@@ -2358,152 +4101,125 @@ def dashboard():
     event_filter = request.args.get("event_type", "")
     source_filter = request.args.get("source_ip", "")
     show_all = request.args.get("view") == "all" or bool(event_filter or source_filter)
-    matching = [event for event in reversed(events)
-                if (not event_filter or event["eventid"] == event_filter)
-                and (not source_filter or event["src_ip"] == source_filter)]
+
+    matching = [
+        event for event in reversed(events)
+        if (not event_filter or event["eventid"] == event_filter)
+        and (not source_filter or event["src_ip"] == source_filter)
+    ]
+
     page_size = 25 if show_all else 10
     page_count = max(1, (len(matching) + page_size - 1) // page_size)
-    page = min(max(request.args.get("page", 1, type=int), 1), page_count) if show_all else 1
+
+    page = (
+        min(max(request.args.get("page", 1, type=int), 1), page_count)
+        if show_all else 1
+    )
+
     start = (page - 1) * page_size
+
     activity = {
-        "events": matching[start:start + page_size], "count": len(matching), "show_all": show_all,
-        "page": page, "pages": page_count, "first": start + 1 if matching else 0,
-        "last": min(start + page_size, len(matching)), "event_filter": event_filter,
+        "events": matching[start:start + page_size],
+        "count": len(matching),
+        "show_all": show_all,
+        "page": page,
+        "pages": page_count,
+        "first": start + 1 if matching else 0,
+        "last": min(start + page_size, len(matching)),
+        "event_filter": event_filter,
         "source_filter": source_filter,
-        "event_options": sorted({event["eventid"] for event in events} | ({event_filter} if event_filter else set())),
-        "source_options": sorted({event["src_ip"] for event in events if event["src_ip"]} | ({source_filter} if source_filter else set())),
+        "event_options": sorted(
+            {event["eventid"] for event in events}
+            | ({event_filter} if event_filter else set())
+        ),
+        "source_options": sorted(
+            {event["src_ip"] for event in events if event["src_ip"]}
+            | ({source_filter} if source_filter else set())
+        ),
     }
+
     def activity_url(page=1):
-        return url_for("dashboard", view="all", page=page,
-                       event_type=event_filter, source_ip=source_filter, _anchor="activity")
-    activity.update(all_url=activity_url(),
-                    previous_url=activity_url(max(1, page - 1)), next_url=activity_url(min(page_count, page + 1)))
+        return url_for(
+            "dashboard",
+            view="all",
+            page=page,
+            event_type=event_filter,
+            source_ip=source_filter,
+            _anchor="activity"
+        )
+
+    activity.update(
+        all_url=activity_url(),
+        previous_url=activity_url(max(1, page - 1)),
+        next_url=activity_url(min(page_count, page + 1))
+    )
+
+    max_ip_count = max(
+        [count for _, count in ip_counter.most_common(10)],
+        default=1
+    )
+
+    max_command_count = max(
+        [count for _, count in command_counter.most_common(10)],
+        default=1
+    )
 
     # --------------------------------------------------------
     # MAP DATA
     # --------------------------------------------------------
-    #
-    # These are demonstration locations for the current
-    # sample_data file.
-    #
-    # Later we can connect these IPs to a real geolocation API.
-    #
-
-    demo_coordinates = {
-
-        "185.220.101.5": {
-            "lat": 51.1657,
-            "lng": 10.4515,
-            "location": "Germany"
-        },
-
-        "103.27.186.12": {
-            "lat": 23.6850,
-            "lng": 90.3563,
-            "location": "Bangladesh"
-        },
-
-        "127.0.0.1": {
-            "lat": 33.7490,
-            "lng": -84.3880,
-            "location": "Atlanta, USA"
-        }
-
-    }
-
 
     attacker_locations = []
 
+    demo_coordinates = {
+        "185.220.101.5": {
+            "lat": 51.1657,
+            "lon": 10.4515,
+            "country": "Germany"
+        },
+        "103.27.186.12": {
+            "lat": 23.6850,
+            "lon": 90.3563,
+            "country": "Bangladesh"
+        },
+        "127.0.0.1": {
+            "lat": 33.7490,
+            "lon": -84.3880,
+            "country": "Atlanta, USA"
+        }
+    }
 
     for ip, count in ip_counter.items():
-
         if ip in demo_coordinates:
+            location = demo_coordinates[ip]
 
             attacker_locations.append({
-
                 "ip": ip,
-
                 "events": count,
-
-                "lat":
-                    demo_coordinates[ip]["lat"],
-
-                "lng":
-                    demo_coordinates[ip]["lng"],
-
-                "location":
-                    demo_coordinates[ip]["location"]
-
+                "lat": location["lat"],
+                "lng": location["lon"],
+                "location": location["country"]
             })
 
-
     # --------------------------------------------------------
-    # EVENT TYPES
+    # EVENT CHART
     # --------------------------------------------------------
 
     event_counter = Counter(
-
-        event.get(
-            "eventid",
-            "Unknown"
-        )
-
-        for event in events
-
+        e.get("eventid", "unknown")
+        for e in events
     )
 
+    event_labels = list(event_counter.keys())
+    event_values = list(event_counter.values())
 
-    event_labels = [EVENT_LABELS.get(name, name) for name in event_counter]
-
-
-    event_values = list(
-        event_counter.values()
-    )
-
-
-    # --------------------------------------------------------
-    # CURRENT TIME
-    # --------------------------------------------------------
-
-    from datetime import datetime, timezone
-
-    current_time = datetime.now(timezone.utc).strftime("%b %d, %Y %I:%M %p UTC")
-
-
-    # --------------------------------------------------------
-    # MAX VALUES
-    # --------------------------------------------------------
-
-    max_ip_count = (
-
-        max(ip_counter.values())
-
-        if ip_counter
-
-        else 1
-
-    )
-
-
-    max_command_count = (
-
-        max(command_counter.values())
-
-        if command_counter
-
-        else 1
-
-    )
-
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # --------------------------------------------------------
     # RENDER
     # --------------------------------------------------------
 
     return render_template_string(
-
         HTML,
-
         total_events=total_events,
 
         commands=commands,
