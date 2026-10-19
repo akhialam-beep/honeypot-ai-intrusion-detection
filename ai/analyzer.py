@@ -126,12 +126,25 @@ def command_indicators(text):
             indicators.add("download")
         if program in {"cat", "head", "tail", "less", "more", "grep", "awk", "sed"} and any(word in {"/etc/passwd", "/etc/shadow"} for word in words[1:]):
             indicators.add("account-files")
+        # Detect direct shell attempts to alter SSH authorized-key files.
+        # A reference in an echo message is not enough: require a write-oriented command.
+        if program in {"tee", "cp", "mv", "install", "touch"} and any(
+            "authorized_keys" in word for word in words[1:]
+        ):
+            indicators.add("ssh-keys")
+        if program in {"crontab"} and any(word in {"-e", "-r"} or word.startswith("-e") for word in words[1:]):
+            indicators.add("cron-change")
+        if program == "rm" and any(word.startswith("-") and "r" in word and "f" in word for word in words[1:]):
+            indicators.add("recursive-delete")
         if program in {"whoami", "id", "uname", "pwd", "ls"}:
             indicators.add("recon")
     return indicators
 
 
 RULES = {
+    "ssh-keys": ("High", "Attempted SSH key modification", "A command referenced an authorized-keys file in a write-oriented operation. The record does not establish that the change succeeded.", "Review the full command and subsequent activity; verify SSH access controls on authorized systems."),
+    "cron-change": ("Medium", "Attempted scheduled-task change", "A command attempted to edit or remove a crontab. This can be legitimate administration or persistence activity.", "Review the user's commands and the system's scheduled-task records."),
+    "recursive-delete": ("High", "Potentially destructive removal", "A command used a recursive, forced remove option. The target and outcome must be reviewed.", "Examine the command arguments and related activity without running them."),
     "download": ("High", "Attempted file download", "Someone tried to download a file. We cannot tell whether the attempt succeeded.", "Check the full activity record and the download address. Do not open or run the file."),
     "account-files": ("High", "Attempted to read account details", "Someone tried to read an account file. We cannot tell whether the attempt succeeded.", "Check what the command returned and what happened next. Keep the test system separate from real systems."),
     "failed-logins": ("Medium", "Repeated login failures", "The same connection address has at least three failed login attempts in these records.", "Check the usernames and times. Compare other records before deciding whether to block the address."),
