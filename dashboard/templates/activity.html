@@ -14,6 +14,7 @@
             <option value="">All addresses</option>
             {% for ip in activity.source_options %}<option value="{{ ip }}" {{ 'selected' if activity.source_filter == ip else '' }}>{{ ip }}</option>{% endfor %}
         </select></label>
+        <label>Search records<input type="search" name="q" maxlength="120" value="{{ activity.search_query }}" placeholder="IP, username, command…" aria-label="Search activity records"></label>
         <button type="submit">Apply filters</button><a href="{{ url_for('dashboard', view='all', _anchor='activity') }}">Clear filters</a>
     </form>
     <div class="table-container" tabindex="0" role="region" aria-label="Activity records; scroll horizontally on small screens">

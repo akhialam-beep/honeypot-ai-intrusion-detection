@@ -47,9 +47,23 @@ class LoginSecurityTests(unittest.TestCase):
         self.assertEqual(self.post(username='试验').status_code, 200)
 
     def test_login_and_logout_flow(self):
-        from werkzeug.security import generate_password_hash
-        with patch.object(web, 'DEMO_PASSWORD_HASH', generate_password_hash('test-only-password')):
-            response = self.post(password='test-only-password')
+        from user_accounts import init_user_db, create_user
+
+        test_db = str(Path(self.directory.name) / "users.sqlite3")
+        init_user_db(test_db)
+        create_user(
+            test_db,
+            username="testuser",
+            password="test-only-password",
+            display_name="Test User",
+            role="viewer",
+        )
+
+        with patch.dict(web.app.config, USER_DB=test_db):
+            response = self.post(
+                username="testuser",
+                password="test-only-password"
+            )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.client.get('/dashboard').status_code, 200)
         self.assertEqual(self.client.get('/logout').status_code, 405)

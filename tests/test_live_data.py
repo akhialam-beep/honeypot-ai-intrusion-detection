@@ -1,4 +1,6 @@
 import importlib
+from contextlib import closing
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,7 +51,7 @@ class LiveDataTests(unittest.TestCase):
         self.assertNotIn('185.220.101.5', page)
         self.upload([])
         import sqlite3
-        with sqlite3.connect(web.app.config['LIVE_DATA_DB']) as conn:
+        with closing(sqlite3.connect(web.app.config['LIVE_DATA_DB'])) as conn, conn:
             conn.execute("UPDATE snapshot SET received='2000-01-01T00:00:00+00:00'")
         self.assertIn('Updates delayed', self.client.get('/dashboard').get_data(as_text=True))
 

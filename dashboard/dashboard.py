@@ -4100,13 +4100,22 @@ def dashboard():
 
     event_filter = request.args.get("event_type", "")
     source_filter = request.args.get("source_ip", "")
-    show_all = request.args.get("view") == "all" or bool(event_filter or source_filter)
+    search_query = request.args.get("q", "").strip()[:120]
+    search_term = search_query.casefold()
+    show_all = request.args.get("view") == "all" or bool(event_filter or source_filter or search_term)
 
     matching = [
-        event for event in reversed(events)
-        if (not event_filter or event["eventid"] == event_filter)
-        and (not source_filter or event["src_ip"] == source_filter)
-    ]
+    event for event in reversed(events)
+    if (not event_filter or event["eventid"] == event_filter)
+    and (not source_filter or event["src_ip"] == source_filter)
+    and (
+        not search_term
+        or any(
+            search_term in str(event.get(key) or "").casefold()
+            for key in ("eventid", "src_ip", "username", "input", "timestamp", "session")
+        )
+    )
+]
 
     page_size = 25 if show_all else 10
     page_count = max(1, (len(matching) + page_size - 1) // page_size)
@@ -4128,6 +4137,7 @@ def dashboard():
         "last": min(start + page_size, len(matching)),
         "event_filter": event_filter,
         "source_filter": source_filter,
+        "search_query": search_query,
         "event_options": sorted(
             {event["eventid"] for event in events}
             | ({event_filter} if event_filter else set())

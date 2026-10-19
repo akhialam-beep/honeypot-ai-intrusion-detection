@@ -1,10 +1,10 @@
 import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
-
+from contextlib import closing
 
 def init_user_db(db_path):
     """Create the users table if it does not already exist."""
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,7 +23,7 @@ def create_user(db_path, username, password, display_name, role="viewer"):
     """Create a new user account."""
     password_hash = generate_password_hash(password)
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.execute(
             """
             INSERT INTO users
@@ -37,7 +37,7 @@ def create_user(db_path, username, password, display_name, role="viewer"):
 
 def get_user_by_username(db_path, username):
     """Retrieve a user without exposing their password hash."""
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.row_factory = sqlite3.Row
         user = conn.execute(
             """
@@ -53,7 +53,7 @@ def get_user_by_username(db_path, username):
 
 def authenticate_user(db_path, username, password):
     """Verify username and password and return the account if valid."""
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.row_factory = sqlite3.Row
         user = conn.execute(
             """
@@ -81,7 +81,7 @@ def authenticate_user(db_path, username, password):
 def change_user_password(db_path, username, current_password, new_password):
     """Change a user's password after verifying the current password."""
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.row_factory = sqlite3.Row
 
         user = conn.execute(
@@ -126,7 +126,7 @@ def change_user_password(db_path, username, current_password, new_password):
 def add_email_support(db_path):
     """Add email and password-reset fields if they do not exist."""
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         columns = {
             row[1]
             for row in conn.execute("PRAGMA table_info(users)")
@@ -152,7 +152,7 @@ def add_email_support(db_path):
 def get_user_by_email(db_path, email):
     """Find an active user account by email address."""
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.row_factory = sqlite3.Row
 
         user = conn.execute(
@@ -171,7 +171,7 @@ def get_user_by_email(db_path, email):
 def save_reset_token(db_path, user_id, token, expires):
     """Store a temporary password-reset token."""
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.execute(
             """
             UPDATE users
@@ -194,7 +194,7 @@ def reset_password_with_token(db_path, token, new_password):
 
     from datetime import datetime
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.row_factory = sqlite3.Row
 
         user = conn.execute(
