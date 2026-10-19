@@ -1,3 +1,4 @@
+from functools import lru_cache
 """Analyze Cowrie events without executing commands or fetching remote content.
 
 The dashboard/live-data integration should call analyze_events(real_event_records).
@@ -21,7 +22,7 @@ SEVERITY = {"Unknown": -1, "Low": 0, "Medium": 1, "High": 2}
 TRAINING_X = [[0, 0], [1, 1], [2, 1], [3, 1], [4, 1], [8, 3], [10, 4], [15, 5]]
 TRAINING_Y = [0, 0, 0, 0, 0, 1, 1, 1]
 MODEL_LIMITATION = (
-    "The Random Forest is a demonstration model trained on eight synthetic examples "
+    "The Random Forest is a demonstration model trained on eight made-up examples "
     "using only command and login counts. Its output is not an attack probability and "
     "has not been validated on real labeled traffic. Use the rule-based evidence and "
     "risk score as transparent triage aids, not proof of compromise."
@@ -60,6 +61,12 @@ def load_event_log(path=DEFAULT_LOG):
     except OSError:
         batch["error"] = "The event log is unavailable. Check the configured path and read access."
     return batch
+
+
+@lru_cache(maxsize=1)
+def get_model():
+    from sklearn.ensemble import RandomForestClassifier
+    return RandomForestClassifier(n_estimators=100, random_state=42).fit(TRAINING_X, TRAINING_Y)
 
 
 def model_signal(commands, logins):

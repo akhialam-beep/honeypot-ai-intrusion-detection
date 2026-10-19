@@ -33,6 +33,12 @@
                 <div><strong>{{ analysis.findings|length }}</strong><span>patterns found</span></div>
                 <div><strong>{{ analysis.command_count }}</strong><span>commands</span></div>
                 <div><strong>{{ analysis.login_count }}</strong><span>login attempts</span></div>
+      <div><strong>{{ analysis.risk_score|default(0) }}/100</strong><span>Risk score</span></div>
+    </div>
+    <p class="analysis-footnote">Risk level: <strong>{{ analysis.risk_level|default(analysis.priority) }}</strong>. This heuristic score is not a probability of attack.</p>
+    {% if analysis.risk_reasons %}
+    <p><strong>Risk reasons:</strong> {{ analysis.risk_reasons|join(', ') }}</p>
+    {% endif %}
             </div>
             {% if analysis.first_event %}
             <div class="analysis-window">
