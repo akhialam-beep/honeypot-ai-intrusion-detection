@@ -53,6 +53,20 @@ class AnalysisTests(unittest.TestCase):
                 self.assertEqual(analyzer.command_indicators(text), set())
         self.assertIn("download", analyzer.command_indicators('whoami; curl "https://example.org/file"'))
 
+    def test_additional_shell_indicators_are_evidence_based(self):
+        cases = [
+            ("tee -a ~/.ssh/authorized_keys", "ssh-keys", "High"),
+            ("crontab -e", "cron-change", "Medium"),
+            ("rm -rf /tmp/unneeded", "recursive-delete", "High"),
+        ]
+        for line, rule, severity in cases:
+            with self.subTest(line=line):
+                result = analyzer.analyze_events([command(line)])
+                finding = next(item for item in result["findings"] if item["id"] == rule)
+                self.assertEqual(finding["severity"], severity)
+                self.assertEqual(finding["count"], 1)
+        self.assertEqual(analyzer.command_indicators("echo 'rm -rf /'"), set())
+
     def test_extreme_timestamps_do_not_prevent_analysis(self):
         event = command("pwd")
         for timestamp in ['0001-01-01T00:00:00+01:00', '9999-12-31T23:59:59-01:00']:

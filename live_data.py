@@ -1,5 +1,7 @@
 """Authenticated, bounded snapshots; MariaDB on the VM remains authoritative."""
+
 from datetime import datetime, timezone
+from contextlib import closing
 import json
 from pathlib import Path
 import secrets
@@ -7,7 +9,6 @@ import sqlite3
 
 from flask import request, abort, jsonify
 from ai.analyzer import normalize_event
-
 MAX_EVENTS = 5000
 MAX_BYTES = 4 * 1024 * 1024
 
@@ -39,7 +40,7 @@ def register_live_data(app):
         path = Path(app.config["LIVE_DATA_DB"])
         path.parent.mkdir(parents=True, exist_ok=True)
         received = datetime.now(timezone.utc).isoformat()
-        with sqlite3.connect(path, timeout=10) as conn:
+        with closing(sqlite3.connect(path, timeout=10)) as conn, conn:
             conn.execute("CREATE TABLE IF NOT EXISTS snapshot (id INTEGER PRIMARY KEY CHECK(id=1), received TEXT NOT NULL, events TEXT NOT NULL)")
             conn.execute("INSERT OR REPLACE INTO snapshot VALUES (1, ?, ?)", (received, json.dumps(events)))
         response = jsonify(accepted=len(events), received_at=received)
@@ -54,7 +55,7 @@ def load_live_data(app):
         path = Path(app.config["LIVE_DATA_DB"])
         if not path.is_file():
             raise OSError("No snapshot")
-        with sqlite3.connect(path, timeout=10) as conn:
+        with closing(sqlite3.connect(path, timeout=10)) as conn, conn:
             row = conn.execute("SELECT received, events FROM snapshot WHERE id=1").fetchone()
         if row is None:
             raise ValueError("No snapshot")

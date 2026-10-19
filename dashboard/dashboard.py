@@ -1640,6 +1640,49 @@ footer {
 
 
 </section>
+<!-- SYSTEM HEALTH MONITORING -->
+<section class="card-panel" id="system-health"
+         style="margin-bottom:25px;">
+
+    <div class="panel-header">
+        <div class="panel-title">
+            <i class="fa-solid fa-heart-pulse"></i>
+            System Health
+        </div>
+
+        <span class="badge
+            {% if system_health.status == 'Receiving Events' %}
+                badge-green
+            {% elif system_health.status == 'Updates Delayed' %}
+                badge-red
+            {% else %}
+                badge-blue
+            {% endif %}">
+            {{ system_health.status }}
+        </span>
+    </div>
+
+    <div class="table-container">
+        <table>
+            <tbody>
+                <tr>
+                    <td>Data Source</td>
+                    <td>{{ system_health.data_source }}</td>
+                </tr>
+                <tr>
+                    <td>Last Successful Upload (UTC)</td>
+                    <td>
+                        {{ system_health.last_upload or 'Not available' }}
+                    </td>
+                </tr>
+                <tr>
+                    <td>Monitoring Status</td>
+                    <td>{{ system_health.detail }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
 
 
 
@@ -4054,6 +4097,38 @@ def dashboard():
     events = log_batch["events"]
     analysis = analyze_events(events)
 
+        # SYSTEM HEALTH MONITORING
+    live_mode = app.config["DATA_MODE"] == "live"
+
+    if not live_mode:
+        system_health = {
+            "status": "Demo Mode",
+            "detail": "Displaying sample events, not live Cowrie activity.",
+            "last_upload": None,
+            "data_source": "Sample Data",
+        }
+    elif not log_batch.get("received_at"):
+        system_health = {
+            "status": "Waiting for Data",
+            "detail": "No live event snapshot has been received.",
+            "last_upload": None,
+            "data_source": "Live Upload API",
+        }
+    elif log_batch.get("stale"):
+        system_health = {
+            "status": "Updates Delayed",
+            "detail": "The most recent snapshot is over 3 minutes old.",
+            "last_upload": log_batch["received_at"],
+            "data_source": "Live Upload API",
+        }
+    else:
+        system_health = {
+            "status": "Receiving Events",
+            "detail": "A recent event snapshot was received.",
+            "last_upload": log_batch["received_at"],
+            "data_source": "Live Upload API",
+        }
+
     # --------------------------------------------------------
     # BASIC COUNTERS
     # --------------------------------------------------------
@@ -4100,13 +4175,22 @@ def dashboard():
 
     event_filter = request.args.get("event_type", "")
     source_filter = request.args.get("source_ip", "")
-    show_all = request.args.get("view") == "all" or bool(event_filter or source_filter)
+    search_query = request.args.get("q", "").strip()[:120]
+    search_term = search_query.casefold()
+    show_all = request.args.get("view") == "all" or bool(event_filter or source_filter or search_term)
 
     matching = [
-        event for event in reversed(events)
-        if (not event_filter or event["eventid"] == event_filter)
-        and (not source_filter or event["src_ip"] == source_filter)
-    ]
+    event for event in reversed(events)
+    if (not event_filter or event["eventid"] == event_filter)
+    and (not source_filter or event["src_ip"] == source_filter)
+    and (
+        not search_term
+        or any(
+            search_term in str(event.get(key) or "").casefold()
+            for key in ("eventid", "src_ip", "username", "input", "timestamp", "session")
+        )
+    )
+]
 
     page_size = 25 if show_all else 10
     page_count = max(1, (len(matching) + page_size - 1) // page_size)
@@ -4128,6 +4212,7 @@ def dashboard():
         "last": min(start + page_size, len(matching)),
         "event_filter": event_filter,
         "source_filter": source_filter,
+        "search_query": search_query,
         "event_options": sorted(
             {event["eventid"] for event in events}
             | ({event_filter} if event_filter else set())
@@ -4227,6 +4312,7 @@ def dashboard():
         logins=logins,
 
         analysis=analysis,
+        system_health=system_health,
         log_batch=log_batch,
         live_mode=app.config["DATA_MODE"] == "live",
         is_sample_data=app.config["DATA_MODE"] == "sample" and Path(LOG_FILE).resolve() == (Path(__file__).resolve().parents[1] / "sample_data" / "cowrie.json"),
