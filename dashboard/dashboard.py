@@ -1813,12 +1813,12 @@ footer {
                         </td>
 
                         <td class="ip">
-                            {{ login.ip }}
+                            {{ login.src_ip }}
                         </td>
 
                         <td>
 
-                            {% if "success" in login.event %}
+                            {% if login.eventid == "cowrie.login.success" %}
 
                                 <span class="badge badge-green">
                                     Success
