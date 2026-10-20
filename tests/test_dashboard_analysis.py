@@ -93,7 +93,7 @@ class DashboardAnalysisTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
 
-        self.assertIn("NO DATA", html)
+        self.assertIn("No data", html)
         self.assertIn("event log is unavailable", html)
 
     def test_malformed_rows_do_not_crash_dashboard_and_are_reported(self):

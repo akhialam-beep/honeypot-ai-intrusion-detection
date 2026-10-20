@@ -1369,7 +1369,7 @@ footer {
 }
 
 </style>
-<link rel="stylesheet" href="{{ url_for('static', filename='analysis.css', v='20260923b') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='analysis.css', v='20261020a') }}">
 </head>
 
 
@@ -1466,12 +1466,7 @@ footer {
      ============================================================ -->
 
 <div class="container" id="dashboard">
-<nav class="section-shortcuts" aria-label="Dashboard sections">
-    <a href="#ai-analysis">Security summary</a><a href="#activity">Activity records</a><a href="#map-section">Example map</a>
-    <form action="{{ url_for('logout') }}" method="post" class="mobile-logout">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Log out</button>
-    </form>
-</nav>
+
 
 
 <!-- ============================================================
@@ -1535,111 +1530,7 @@ footer {
      METRICS
      ============================================================ -->
 
-<section class="metrics">
 
-
-    <div class="metric">
-
-        <div class="metric-icon blue">
-
-            <i class="fa-solid fa-file-lines"></i>
-
-        </div>
-
-        <div class="metric-title">
-            TOTAL EVENTS
-        </div>
-
-        <div class="metric-number">
-            {{ total_events }}
-        </div>
-
-        <div class="metric-footer">
-            Recorded actions and connections
-        </div>
-
-        <div class="metric-line"></div>
-
-    </div>
-
-
-
-    <div class="metric">
-
-        <div class="metric-icon purple">
-
-            <i class="fa-solid fa-terminal"></i>
-
-        </div>
-
-        <div class="metric-title">
-            COMMANDS DETECTED
-        </div>
-
-        <div class="metric-number">
-            {{ commands }}
-        </div>
-
-        <div class="metric-footer">
-            Instructions entered on the test system
-        </div>
-
-        <div class="metric-line"></div>
-
-    </div>
-
-
-
-    <div class="metric">
-
-        <div class="metric-icon green">
-
-            <i class="fa-solid fa-user-shield"></i>
-
-        </div>
-
-        <div class="metric-title">
-            LOGIN ATTEMPTS
-        </div>
-
-        <div class="metric-number">
-            {{ logins }}
-        </div>
-
-        <div class="metric-footer">
-            Attempts to sign in
-        </div>
-
-        <div class="metric-line"></div>
-
-    </div>
-
-
-
-    <div class="metric">
-
-        <div class="metric-icon red">
-
-            <i class="fa-solid fa-triangle-exclamation"></i>
-
-        </div>
-
-        <div class="metric-title">
-            ANALYSIS STATUS
-        </div>
-        <div class="metric-number" style="font-size:24px;">
-            {{ analysis.status }}
-        </div>
-        <div class="metric-footer">
-            <a href="#ai-analysis" style="color:inherit;">{{ analysis.priority }} priority · View analysis →</a>
-        </div>
-
-        <div class="metric-line"></div>
-
-    </div>
-
-
-</section>
 <!-- SYSTEM HEALTH MONITORING -->
 <section class="card-panel" id="system-health"
          style="margin-bottom:25px;">
