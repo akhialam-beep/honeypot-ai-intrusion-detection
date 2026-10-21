@@ -1,5 +1,9 @@
 <section class="card-panel activity-panel" id="activity" aria-labelledby="activity-title">
     <div class="panel-header">
+<a class="view-all"
+   href="{{ url_for('export_activity', event_type=activity.event_filter, source_ip=activity.source_filter, q=activity.search_query) }}">
+   Export CSV ↓
+</a>
         <div><h2 class="panel-title" id="activity-title">{{ 'All activity records' if activity.show_all else 'Recent activity' }}</h2>
         <p class="panel-subtitle">{{ activity.count }} matching events. Filters below affect this list only.</p></div>
         {% if not activity.show_all %}<a class="view-all" href="{{ activity.all_url }}">View all records →</a>{% endif %}

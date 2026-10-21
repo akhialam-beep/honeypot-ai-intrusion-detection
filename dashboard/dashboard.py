@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 from datetime import datetime, timedelta
 import sqlite3
+import csv
 import smtplib
 from email.message import EmailMessage
 from dotenv import load_dotenv
@@ -4018,7 +4019,63 @@ def logout():
 # ============================================================
 # DASHBOARD ROUTE
 # ============================================================
+@app.route("/export-activity")
+def export_activity():
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
 
+    log_batch = (
+        load_live_data(app)
+        if app.config["DATA_MODE"] == "live"
+        else load_event_log(LOG_FILE)
+    )
+    events = log_batch["events"]
+
+    event_filter = request.args.get("event_type", "")
+    source_filter = request.args.get("source_ip", "")
+    search_term = request.args.get("q", "").strip()[:120].casefold()
+
+    matching = [
+        event for event in reversed(events)
+        if (not event_filter or event.get("eventid") == event_filter)
+        and (not source_filter or event.get("src_ip") == source_filter)
+        and (
+            not search_term
+            or any(
+                search_term in str(event.get(key) or "").casefold()
+                for key in (
+                    "eventid", "src_ip", "username",
+                    "input", "timestamp", "session"
+                )
+            )
+        )
+    ]
+
+    output = make_response("")
+    output.headers["Content-Type"] = "text/csv; charset=utf-8"
+    output.headers["Content-Disposition"] = (
+        'attachment; filename="security_activity_report.csv"'
+    )
+
+    import io
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([
+        "Timestamp", "Event Type", "Source IP",
+        "Username", "Details"
+    ])
+
+    for event in matching:
+        writer.writerow([
+            event.get("timestamp", ""),
+            event.get("eventid", ""),
+            event.get("src_ip", ""),
+            event.get("username", ""),
+            event.get("input", "")
+        ])
+
+    output.set_data(buffer.getvalue())
+    return output
 @app.route("/")
 @app.route("/dashboard")
 def dashboard():
