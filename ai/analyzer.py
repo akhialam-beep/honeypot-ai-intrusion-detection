@@ -383,6 +383,57 @@ def analyze_events(events):
     }
 
 
+def detect_brute_force(events, threshold=5, window_seconds=300):
+    """Detect repeated failed logins from one IP within a time window."""
+    from collections import defaultdict
+    from datetime import datetime, timezone, timedelta
+
+    attempts = defaultdict(list)
+    alerts = []
+
+    for event in events:
+        clean = normalize_event(event)
+        if not clean or clean["eventid"] != "cowrie.login.failed":
+            continue
+        if not clean["src_ip"] or not clean["timestamp"]:
+            continue
+
+        try:
+            timestamp = datetime.fromisoformat(
+                clean["timestamp"].replace("Z", "+00:00")
+            )
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            else:
+                timestamp = timestamp.astimezone(timezone.utc)
+        except (ValueError, OverflowError):
+            continue
+
+        attempts[clean["src_ip"]].append((timestamp, clean))
+
+    for ip, rows in attempts.items():
+        rows.sort(key=lambda row: row[0])
+        left = 0
+
+        for right, (timestamp, event) in enumerate(rows):
+            while (timestamp - rows[left][0]).total_seconds() > window_seconds:
+                left += 1
+
+            if right - left + 1 >= threshold:
+                alerts.append({
+                    "ip": ip,
+                    "count": right - left + 1,
+                    "first_attempt": rows[left][1]["timestamp"],
+                    "last_attempt": event["timestamp"],
+                    "severity": "High",
+                    "message": (
+                        f"{right - left + 1} failed login attempts "
+                        f"from {ip} within {window_seconds // 60} minutes"
+                    ),
+                })
+                break
+
+    return alerts
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("log", nargs="?", type=Path, default=DEFAULT_LOG)

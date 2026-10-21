@@ -78,7 +78,7 @@ Let's Get Sticky
 # Keep the documented `python dashboard/dashboard.py` entry point working.
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ai.analyzer import analyze_events, load_event_log
+from ai.analyzer import analyze_events, load_event_log, detect_brute_force
 from auth_security import reserve_login_attempt, clear_login_attempts
 from live_data import register_live_data, load_live_data
 from user_accounts import (
@@ -1577,6 +1577,47 @@ footer {
 
 
 
+<!-- BRUTE-FORCE ALERTS -->
+<section class="card-panel" id="brute-force-alerts" style="margin-bottom:25px;">
+  <div class="panel-header">
+    <div class="panel-title">
+      <i class="fa-solid fa-shield-halved"></i>
+      Brute-Force Alerts
+    </div>
+    <span class="badge {% if brute_force_alerts %}badge-red{% else %}badge-green{% endif %}">
+      {{ brute_force_alerts|length }} alert{{ '' if brute_force_alerts|length == 1 else 's' }}
+    </span>
+  </div>
+
+  {% if total_events == 0 %}
+    <p>No events available to evaluate yet.</p>
+  {% elif brute_force_alerts %}
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th>Source IP</th>
+            <th>Failed Attempts</th>
+            <th>First to Last Attempt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for alert in brute_force_alerts %}
+          <tr>
+            <td><span class="badge badge-red">{{ alert.severity }}</span></td>
+            <td>{{ alert.ip }}</td>
+            <td>{{ alert.count }}</td>
+            <td>{{ alert.first_attempt }} – {{ alert.last_attempt }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p>No brute-force patterns detected in the available events.</p>
+  {% endif %}
+</section>
 {% include "ai_analysis.html" %}
 
 <!-- ============================================================
@@ -3987,6 +4028,7 @@ def dashboard():
     log_batch = load_live_data(app) if app.config["DATA_MODE"] == "live" else load_event_log(LOG_FILE)
     events = log_batch["events"]
     analysis = analyze_events(events)
+    brute_force_alerts = detect_brute_force(events)
 
         # SYSTEM HEALTH MONITORING
     live_mode = app.config["DATA_MODE"] == "live"
@@ -4204,6 +4246,7 @@ def dashboard():
 
         analysis=analysis,
         system_health=system_health,
+        brute_force_alerts=brute_force_alerts,
         log_batch=log_batch,
         live_mode=app.config["DATA_MODE"] == "live",
         is_sample_data=app.config["DATA_MODE"] == "sample" and Path(LOG_FILE).resolve() == (Path(__file__).resolve().parents[1] / "sample_data" / "cowrie.json"),
